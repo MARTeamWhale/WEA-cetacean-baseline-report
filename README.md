@@ -1,2 +1,2 @@
-# osw-cetacean-baseline-report
+# WEA-cetacean-baseline-report
 
