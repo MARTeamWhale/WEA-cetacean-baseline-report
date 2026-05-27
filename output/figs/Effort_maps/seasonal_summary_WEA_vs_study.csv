@@ -1,0 +1,11 @@
+target_label,region,Spring_n_records,Spring_n_years,Summer_n_records,Summer_n_years,Fall_n_records,Fall_n_years,Winter_n_records,Winter_n_years
+Baleen Whales (guild),Study Region,121,14,708,15,234,15,6,4
+Baleen Whales (guild),WEA,22,9,108,13,58,11,2,2
+Blue Whale,Study Region,4,3,81,10,11,6,0,0
+Blue Whale,WEA,0,0,3,1,3,2,0,0
+Harbour Porpoise,Study Region,6,4,30,11,8,4,1,1
+Harbour Porpoise,WEA,0,0,2,2,0,0,0,0
+North Atlantic Right Whale,Study Region,12,5,8,6,7,4,0,0
+North Atlantic Right Whale,WEA,0,0,2,1,0,0,0,0
+Small Odontocetes (guild),Study Region,115,14,2200,15,656,15,20,10
+Small Odontocetes (guild),WEA,13,6,126,10,59,9,0,0

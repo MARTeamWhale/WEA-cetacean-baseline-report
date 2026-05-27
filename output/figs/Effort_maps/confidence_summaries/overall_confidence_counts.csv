@@ -1,0 +1,11 @@
+confidence,n,percent,region
+High,90,29,Study Region
+Medium-High,63,20.3,Study Region
+Medium,46,14.8,Study Region
+Low-Medium,28,9,Study Region
+Low,83,26.8,Study Region
+High,6,25,WEA
+Medium-High,6,25,WEA
+Medium,4,16.7,WEA
+Low-Medium,5,20.8,WEA
+Low,3,12.5,WEA

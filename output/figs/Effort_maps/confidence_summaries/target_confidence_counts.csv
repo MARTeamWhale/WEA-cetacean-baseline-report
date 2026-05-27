@@ -1,0 +1,49 @@
+target_conf,n,percent,target,region
+High,0,0,NARW,Study Region
+Moderate,21,6.8,NARW,Study Region
+Low,1,0.3,NARW,Study Region
+No evidence,288,92.9,NARW,Study Region
+High,3,1,Blue_whale,Study Region
+Moderate,29,9.4,Blue_whale,Study Region
+Low,1,0.3,Blue_whale,Study Region
+No evidence,277,89.4,Blue_whale,Study Region
+High,74,23.9,Shelf_baleen,Study Region
+Moderate,123,39.7,Shelf_baleen,Study Region
+Low,6,1.9,Shelf_baleen,Study Region
+No evidence,107,34.5,Shelf_baleen,Study Region
+High,0,0,Harbour_porpoise,Study Region
+Moderate,34,11,Harbour_porpoise,Study Region
+Low,0,0,Harbour_porpoise,Study Region
+No evidence,276,89,Harbour_porpoise,Study Region
+High,122,39.4,Small_odontocetes,Study Region
+Moderate,95,30.6,Small_odontocetes,Study Region
+Low,8,2.6,Small_odontocetes,Study Region
+No evidence,85,27.4,Small_odontocetes,Study Region
+High,6,1.9,Deep_divers,Study Region
+Moderate,30,9.7,Deep_divers,Study Region
+Low,1,0.3,Deep_divers,Study Region
+No evidence,273,88.1,Deep_divers,Study Region
+High,0,0,NARW,WEA Areas
+Moderate,1,4.2,NARW,WEA Areas
+Low,0,0,NARW,WEA Areas
+No evidence,23,95.8,NARW,WEA Areas
+High,0,0,Blue_whale,WEA Areas
+Moderate,3,12.5,Blue_whale,WEA Areas
+Low,1,4.2,Blue_whale,WEA Areas
+No evidence,20,83.3,Blue_whale,WEA Areas
+High,8,33.3,Shelf_baleen,WEA Areas
+Moderate,9,37.5,Shelf_baleen,WEA Areas
+Low,2,8.3,Shelf_baleen,WEA Areas
+No evidence,5,20.8,Shelf_baleen,WEA Areas
+High,0,0,Harbour_porpoise,WEA Areas
+Moderate,2,8.3,Harbour_porpoise,WEA Areas
+Low,0,0,Harbour_porpoise,WEA Areas
+No evidence,22,91.7,Harbour_porpoise,WEA Areas
+High,11,45.8,Small_odontocetes,WEA Areas
+Moderate,8,33.3,Small_odontocetes,WEA Areas
+Low,2,8.3,Small_odontocetes,WEA Areas
+No evidence,3,12.5,Small_odontocetes,WEA Areas
+High,0,0,Deep_divers,WEA Areas
+Moderate,0,0,Deep_divers,WEA Areas
+Low,1,4.2,Deep_divers,WEA Areas
+No evidence,23,95.8,Deep_divers,WEA Areas

@@ -1,11 +1,17 @@
 # History files
 .Rhistory
 .Rapp.history
+.Rproj
 
 # Session Data files
 .RData
 .RDataTmp
 
+*.png
+*.tif
+*data*
+*shape*
+*.pdf
 # User-specific files
 .Ruserdata
 
@@ -47,3 +53,4 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+.positai

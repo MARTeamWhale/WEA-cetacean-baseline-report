@@ -1,0 +1,3 @@
+region,total_cells,cells_with_data,total_records,mean_records_per_cell,median_records_per_cell,mean_years_per_cell,median_years_per_cell,pct_high_confidence,pct_medium_high_confidence,pct_low_confidence
+Study Region,310,310,6824,22,12,5.2,5,29,49.4,35.8
+WEA,24,24,505,21,14,5.5,4.5,25,50,33.3

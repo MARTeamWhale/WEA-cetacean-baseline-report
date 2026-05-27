@@ -1,0 +1,1200 @@
+---
+title: "Cetacean Distribution Analysis — Project Report"
+author: "Laura Joan Feyrer"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: flatly
+    code_folding: hide
+    fig_width: 10
+    fig_height: 6
+---
+
+```{r header-comment, include=FALSE}
+# ============================================================
+# Laura Joan Feyrer
+# Date Updated: 2026-05-22
+# Report: Cetacean_dist_report
+# Description: RMarkdown report summarising cetacean
+#              distribution analysis. Draws all figures from
+#              saved PNGs on disk (no spatial data loaded);
+#              summary statistics sourced from lightweight
+#              CSV exports only. 
+
+# ============================================================
+```
+
+```{r setup, include=FALSE}
+# ---- Setup: global chunk options ----
+knitr::opts_chunk$set(
+  echo      = FALSE,
+  message   = FALSE,
+  warning   = FALSE,
+  fig.align = "center"
+)
+
+knitr::opts_knit$set(root.dir = here::here())
+```
+
+```{r packages, include=FALSE}
+# ---- Setup: packages (lightweight only — no sf/raster/spatstat) ----
+suppressMessages({
+  if (!requireNamespace("pacman", quietly = TRUE)) {
+    install.packages("pacman")
+  }
+
+  pacman::p_load(
+    tidyverse,
+    knitr,
+    kableExtra,
+    here,
+    lubridate,
+    scales,
+    conflicted
+  )
+})
+
+conflicted::conflict_prefer("filter", "dplyr")
+```
+
+```{r fig-paths, include=FALSE}
+# ---- CSV freshness check --------------------------------------------------------
+# Warns if confidence CSVs are older than the seasonal summary, which would
+# indicate 05_summarize_wsdb_confidence.R was not re-run after the last data update.
+
+check_csv_freshness <- function(reference_path, check_paths) {
+  if (!file.exists(reference_path)) return(invisible())
+  ref_time <- file.mtime(reference_path)
+  stale <- check_paths[file.exists(check_paths) & 
+                        file.mtime(check_paths) < ref_time]
+  if (length(stale) > 0) {
+    warning(
+      "The following CSVs are older than seasonal_summary_WEA_vs_study.csv ",
+      "and may contain stale counts. Re-run 04_summarize_wsdb_effort.R to update:\n  ",
+      paste(basename(stale), collapse = "\n  ")
+    )
+  }
+}
+
+check_csv_freshness(
+  reference_path = here("output/data/seasonal_summary_WEA_vs_study.csv"),
+  check_paths    = c(
+    here("output/data/overall_conf_summary.csv"),
+    here("output/data/target_conf_summary.csv"),
+    here("output/data/all_cet_seasonal_totals.csv")
+  )
+)
+# ============================================================
+# Figure & data path configuration
+# All paths hardcoded from actual output/figs file listing
+# Root: here() = project root (set by knitr::opts_knit above)
+# ============================================================
+# ---- Helper: restore apostrophes lost in filename conventions ----
+# Called in label-cleaning functions before str_remove_all strips them.
+# Covers the pattern where "Sowerby's" → "SOWERBYS" in filename →
+# "Sowerbys" after toTitleCase → needs "Sowerby's" restored for display.
+restore_apostrophes <- function(x) {
+  x |>
+    stringr::str_replace_all("(?i)\\bSowerby S\\b",    "Sowerby's") |>
+    stringr::str_replace_all("(?i)\\bRisso S\\b",       "Risso's") |>
+    stringr::str_replace_all("(?i)\\bTrue S\\b",        "True's") |>
+    stringr::str_replace_all("(?i)\\bGervais S\\b",     "Gervais'") |>
+    stringr::str_replace_all("(?i)\\bBlainville S\\b",  "Blainville's") |>
+    stringr::str_replace_all("(?i)\\bCuvier S\\b",      "Cuvier's")
+}
+# ---- Helper: display a saved PNG or a fallback message ----
+show_fig <- function(path) {
+  if (!is.null(path) && file.exists(path)) {
+    knitr::include_graphics(path)
+  } else {
+    cat(paste0("> *Figure not found: `", path, "`*\n\n"))
+  }
+}
+
+# ---- Helper: loop-render a vector of PNG paths with knitr::include_graphics ----
+# Use inside results='asis' chunks. knitr::include_graphics() is the only
+# reliable way to embed images from R code — markdown ![]() syntax is not
+# processed when emitted from cat() inside a chunk.
+show_fig_loop <- function(files, label_fn) {
+  for (f in files) {
+    label <- label_fn(basename(f))
+    cat(paste0("\n\n#### ", label, "\n\n"))
+    # knitr::include_graphics needs a separate chunk call — we use
+    # a sub-knit trick: emit a fenced chunk that will be evaluated
+    # NOTE: for results='asis' loops the cleanest approach is to knit
+    # child chunks. We use knitr::knit_expand + knitr::knit_child below.
+  }
+}
+
+# ---- Helper: read CSV with graceful fallback ----
+read_csv_safe <- function(path) {
+  if (file.exists(path)) {
+    readr::read_csv(path, show_col_types = FALSE)
+  } else {
+    cat(paste0("> *CSV not found: `", path,
+               "` — add write_csv() to the relevant script and re-run once.*\n\n"))
+    NULL
+  }
+}
+
+# ==============================================================
+# SIGHTINGS MAPS
+# Source script: 03_plot_combined_sightings.R
+# ggsave → output/figs/sights/
+# ==============================================================
+fig_wsdb_facet        <- here("output/figs/sights/WSDB_Whale_sightings_facet.png")
+fig_aerial_facet      <- here("output/figs/sights/Aerial_Whale_sightings_facet.png")
+
+# Individual WSDB species maps (output/figs/sights/WSDB_Sightings_*.png)
+fig_wsdb_blue         <- here("output/figs/sights/WSDB_Sightings_WHALE_BLUE.png")
+fig_wsdb_fin          <- here("output/figs/sights/WSDB_Sightings_WHALE_FIN.png")
+fig_wsdb_humpback     <- here("output/figs/sights/WSDB_Sightings_WHALE_HUMPBACK.png")
+fig_wsdb_minke        <- here("output/figs/sights/WSDB_Sightings_WHALE_MINKE.png")
+fig_wsdb_sei          <- here("output/figs/sights/WSDB_Sightings_WHALE_NORTHERN_BOTTLENOSE.png")
+fig_wsdb_narw         <- here("output/figs/sights/WSDB_Sightings_WHALE_NORTH_ATLANTIC_RIGHT.png")  # not in listing — check script
+fig_wsdb_narw         <- here("output/figs/sights/WSDB_Sightings_WHALE_SPERM.png")                 # placeholder; update if NARW file exists
+fig_wsdb_pilot        <- here("output/figs/sights/WSDB_Sightings_WHALE_LONG_FINNED_PILOT.png")
+fig_wsdb_sperm        <- here("output/figs/sights/WSDB_Sightings_WHALE_SPERM.png")
+fig_wsdb_sowerby      <- here("output/figs/sights/WSDB_Sightings_WHALE_SOWERBY_S_BEAKED.png")
+fig_wsdb_dolphins_aws <- here("output/figs/sights/WSDB_Sightings_DOLPHINS_ATLANTIC_WHITE_SIDED.png")
+fig_wsdb_dolphins_com <- here("output/figs/sights/WSDB_Sightings_DOLPHINS_COMMON.png")
+fig_wsdb_dolphins_ris <- here("output/figs/sights/WSDB_Sightings_DOLPHINS_RISSO_S.png")
+fig_wsdb_porpoise     <- here("output/figs/sights/WSDB_Sightings_PORPOISE_HARBOUR.png")            # not in listing — check
+fig_wsdb_porpoise     <- here("output/figs/sights/WSDB_Sightings_DOLPHINS_PORPOISE_NS.png")        # closest match in listing
+
+# ==============================================================
+# figs/Effort_maps & COVERAGE MAPS
+# Source script: 04_summarize_wsdb_effort.R
+# ggsave → output/figs/figs/Effort_maps/
+# ==============================================================
+fig_coverage          <- here("output/figs/Effort_maps/00_all_cetacean_records.png")
+  # p_all: gridded density of all cetacean sightings (25 km grid, log10 scale)
+fig_confidence        <- here("output/figs/Effort_maps/00_data_consistency.png")
+  # p_conf: coverage × temporal consistency confidence index
+fig_seasonal_map      <- here("output/figs/Effort_maps/00_seasonal_coverage.png")
+  # p_seasonal: seasonal faceted sightings map (Spring/Summer/Fall/Winter)
+fig_seasonal_bars     <- here("output/figs/Effort_maps/00_seasonal_coverage_pct_study_area.png")
+  # p_seasonal_bars: total records and occupied grid cells by season
+
+# Target species figs/Effort_maps maps (records + figs/Effort_maps-normalised share)
+Blue_whale_1_target_records       <- here("output/figs/Effort_maps/Blue_whale_1_target_records.png")
+Blue_whale_2_share <- here("output/figs/Effort_maps/Blue_whale_2_share.png")
+NARW_1_target_records       <- here("output/figs/Effort_maps/NARW_1_target_records.png")
+NARW_2_share <- here("output/figs/Effort_maps/NARW_2_share.png")
+Shelf_baleen_1_target_records      <- here("output/figs/Effort_maps/Shelf_baleen_1_target_records.png")
+Shelf_baleen_2_share <- here("output/figs/Effort_maps/Shelf_baleen_2_share.png")
+Deep_divers_1_target_records   <- here("output/figs/Effort_maps/Deep_divers_1_target_records.png")
+Deep_divers_2_share<- here("output/figs/Effort_maps/Deep_divers_2_share.png")
+Harbour_porpoise_1_target_records         <- here("output/figs/Effort_maps/Harbour_porpoise_1_target_records.png")
+Harbour_porpoise_2_share   <- here("output/figs/Effort_maps/Harbour_porpoise_2_share.png")
+Small_odontocetes_1_target_records   <- here("output/figs/Effort_maps/Small_odontocetes_1_target_records.png")
+Small_odontocetes_2_share   <- here("output/figs/Effort_maps/Small_odontocetes_2_share.png")
+
+# Confidence summary figures (05_summarize_wsdb_confidence.R)
+fig_conf_comparison   <- here("output/figs/Effort_maps/confidence_summaries/confidence_comparison.png")
+fig_conf_heatmap      <- here("output/figs/Effort_maps/confidence_summaries/target_confidence_heatmap.png")
+fig_conf_heatmap_WEA  <- here("output/figs/Effort_maps/confidence_summaries/target_confidence_heatmap_OSW.png")
+
+# ==============================================================
+# PAM SUMMARY FIGURES
+# Source script: 07_summarize_pam_detections.R
+# ggsave → output/figs/figs/Effort_maps/PAM/
+# ==============================================================
+fig_pam_sites_year    <- here("output/figs/Effort_maps/PAM/annual_sitfigs/Effort_maps_bymonth.png")
+  # p1: number of PAM sites sampled per year by season
+fig_pam_combined      <- here("output/figs/Effort_maps/PAM/combined_seasonal.png")
+  # combined_seasonal: p1–p5 patchwork layout saved to disk
+fig_pam_monthly_det   <- here("output/figs/Effort_maps/PAM/monthly_detections_SS.png")
+  # monthly detection summary
+fig_pam_site_map      <- here("output/figs/Effort_maps/PAM/Site_effort_map.png")
+  # p_map: PAM station distribution map by season
+fig_pam_coverage      <- here("output/figs/Effort_maps/PAM/PAM_station_range_scenarios.png")
+  # p_pam_range: 5/10/25/50 km acoustic buffer scenarios
+fig_pam_station_cov   <- here("output/figs/Effort_maps/PAM/PAM_station_coverage.png")
+  # overall PAM station coverage map
+
+# ==============================================================
+# KDE OUTPUTS — individual and family-level
+# Source script: 08_run_kde_models.R → performKDE()
+# ggsave → output/figs/
+# Note: two versions per species —
+#   KDE_*.png         = contour-only map (used in shapefiles/report)
+#   KDE_*.png     = full annotated figure with basemap
+# ==============================================================
+
+# ---- PAM KDEs: baleen whales ----
+fig_kde_pam_blue      <- here("output/figs/KDE_maps/KDE_pam_baleen_Blue_Whale_Bm_fixed_bw10000.png")
+fig_kde_pam_fin       <- here("output/figs/KDE_maps/KDE_pam_baleen_Fin_Whale_Bp_fixed_bw10000.png")
+fig_kde_pam_humpback  <- here("output/figs/KDE_maps/KDE_pam_baleen_Humpback_Whale_Mn_fixed_bw10000.png")
+fig_kde_pam_minke     <- here("output/figs/KDE_maps/KDE_pam_baleen_Minke_Whale_Ba_fixed_bw10000.png")
+fig_kde_pam_narw      <- here("output/figs/KDE_maps/KDE_pam_baleen_North_Atlantic_Right_Whale_Eg_fixed_bw10000.png")
+fig_kde_pam_sei       <- here("output/figs/KDE_maps/KDE_pam_baleen_Sei_Whale_Bb_fixed_bw10000.png")
+
+# ---- PAM KDEs: beaked whales ----
+fig_kde_pam_zc        <- here("output/figs/KDE_maps/KDE_pam_beaked_Goose_Beaked_Whale_Zc_fixed_bw10000.png")
+fig_kde_pam_ha        <- here("output/figs/KDE_maps/KDE_pam_beaked_Northern_Bottlenose_Whale_Ha_fixed_bw10000.png")
+fig_kde_pam_mb        <- here("output/figs/KDE_maps/KDE_pam_beaked_Sowerbys_Beaked_Whale_Mb_fixed_bw10000.png")
+fig_kde_pam_mmme      <- here("output/figs/KDE_maps/KDE_pam_beaked_Trues_Gervais_Beaked_Whale_MmMe_fixed_bw10000.png")
+
+# ---- Sightings KDEs: family groups ----
+fig_kde_sights_mysticetes  <- here("output/figs/KDE_maps/KDE_sightings_mysticetes_Mysticetes_(All_Baleen_Whales)_fixed_bw10000.png")
+fig_kde_sights_odontocetes <- here("output/figs/KDE_maps/KDE_sightings_odontocetes_Odontocetes_(All_Toothed_Whales)_fixed_bw10000.png")
+
+# ---- Sightings KDEs: individual species (proximity-weighted) ----
+fig_kde_sights_blue        <- here("output/figs/KDE_maps/KDE_sightings_species_proximity_WHALE-BLUE_fixed_bw10000.png")
+fig_kde_sights_fin         <- here("output/figs/KDE_maps/KDE_sightings_species_proximity_WHALE-FIN_fixed_bw10000.png")
+fig_kde_sights_humpback    <- here("output/figs/KDE_maps/KDE_sightings_species_proximity_WHALE-HUMPBACK_fixed_bw10000.png")
+fig_kde_sights_minke       <- here("output/figs/KDE_maps/KDE_sightings_species_proximity_WHALE-MINKE_fixed_bw10000.png")
+fig_kde_sights_narw        <- here("output/figs/KDE_maps/KDE_sightings_species_proximity_WHALE-NORTH_ATLANTIC_RIGHT_fixed_bw10000.png")
+fig_kde_sights_sei         <- here("output/figs/KDE_maps/KDE_sightings_species_proximity_WHALE-SEI_fixed_bw10000.png")
+fig_kde_sights_bottlenose  <- here("output/figs/KDE_maps/KDE_sightings_species_proximity_WHALE-NORTHERN_BOTTLENOSE_fixed_bw10000.png")
+fig_kde_sights_sperm       <- here("output/figs/KDE_maps/KDE_sightings_species_proximity_WHALE-SPERM_fixed_bw10000.png")
+fig_kde_sights_pilot       <- here("output/figs/KDE_maps/KDE_sightings_species_proximity_WHALE-_LONG-FINNED_PILOT_fixed_bw10000.png")
+fig_kde_sights_sowerby     <- here("output/figs/KDE_maps/KDE_sightings_species_proximity_WHALE-SOWERBY'S_BEAKED_fixed_bw10000.png")
+fig_kde_sights_aws         <- here("output/figs/KDE_maps/KDE_sightings_species_proximity_DOLPHINS-ATLANTIC_WHITE-SIDED_fixed_bw10000.png")
+fig_kde_sights_common_dol  <- here("output/figs/KDE_maps/KDE_sightings_species_proximity_DOLPHINS-COMMON_fixed_bw10000.png")
+fig_kde_sights_risso       <- here("output/figs/KDE_maps/KDE_sightings_species_proximity_DOLPHINS-RISSO'S_fixed_bw10000.png")
+fig_kde_sights_harbour_p   <- here("output/figs/KDE_maps/KDE_sightings_species_proximity_PORPOISE-HARBOUR_fixed_bw10000.png")
+fig_kde_sights_baleen_ns   <- here("output/figs/KDE_maps/KDE_sightings_species_proximity_BALEEN_WHALE_(NS)_fixed_bw10000.png")
+fig_kde_sights_dol_p_ns    <- here("output/figs/KDE_maps/KDE_sightings_species_proximity_DOLPHINS_PORPOISE_(NS)_fixed_bw10000.png")
+
+# ---- Grouped KDEs ----
+fig_kde_grouped_baleen     <- here("output/figs/KDE_maps/KDE_pam_grouped_baleen_All_Baleen_Whales_(PAM)_fixed_bw10000.png")
+fig_kde_grouped_beaked     <- here("output/figs/KDE_maps/KDE_pam_grouped_beaked_All_Beaked_Whales_(PAM)_fixed_bw10000.png")
+
+# ==============================================================
+# PAM vs SIGHTINGS COMPARISON MAPS
+# Source script: 10_compare_kde_pam_vs_sightings.R → create_comparison_map()
+# ggsave → output/figs/compare_sightings_pam/
+# Naming: compare_<species>__S_<method>__P_<method>.png
+#         pam_only_<species>__P_<method>.png
+#         sightings_only_<species>__S_<method>.png
+# ==============================================================
+
+# ---- Side-by-side PAM vs sightings ----
+fig_cmp_blue          <- here("output/figs/compare_sightings_pam/compare_blue_whale__S_prox_fixed_bw10000__P_unw_fixed_bw10000.png")
+fig_cmp_fin           <- here("output/figs/compare_sightings_pam/compare_fin_whale__S_prox_fixed_bw10000__P_unw_fixed_bw10000.png")
+fig_cmp_humpback      <- here("output/figs/compare_sightings_pam/compare_humpback_whale__S_prox_fixed_bw10000__P_unw_fixed_bw10000.png")
+fig_cmp_minke         <- here("output/figs/compare_sightings_pam/compare_minke_whale__S_prox_fixed_bw10000__P_unw_fixed_bw10000.png")
+fig_cmp_narw          <- here("output/figs/compare_sightings_pam/compare_north_atlantic_right_whale__S_prox_fixed_bw10000__P_unw_fixed_bw10000.png")
+fig_cmp_bottlenose    <- here("output/figs/compare_sightings_pam/compare_northern_bottlenose_whale__S_prox_fixed_bw10000__P_unw_fixed_bw10000.png")
+fig_cmp_sei           <- here("output/figs/compare_sightings_pam/compare_sei_whale__S_prox_fixed_bw10000__P_unw_fixed_bw10000.png")
+fig_cmp_sowerby       <- here("output/figs/compare_sightings_pam/compare_sowerbys_beaked_whale__S_prox_fixed_bw10000__P_unw_fixed_bw10000.png")
+fig_cmp_all_baleen    <- here("output/figs/compare_sightings_pam/compare_all_baleen_whales__S_unw_fixed_bw10000__P_unw_fixed_bw10000.png")
+
+# ---- PAM only (no sightings KDE available) ----
+fig_pam_only_beaked   <- here("output/figs/compare_sightings_pam/pam_only_all_beaked_whales__P_unw_fixed_bw10000.png")
+fig_pam_only_zc       <- here("output/figs/compare_sightings_pam/pam_only_goose_beaked_whale__P_unw_fixed_bw10000.png")
+fig_pam_only_mmme     <- here("output/figs/compare_sightings_pam/pam_only_trues_gervais_beaked_whale__P_unw_fixed_bw10000.png")
+
+# ---- Sightings only (no PAM KDE available) ----
+fig_so_odontocetes    <- here("output/figs/compare_sightings_pam/sightings_only_all_odontocetes__S_unw_fixed_bw10000.png")
+fig_so_baleen_ns      <- here("output/figs/compare_sightings_pam/sightings_only_baleen_whale_ns___S_prox_fixed_bw10000.png")
+fig_so_aws            <- here("output/figs/compare_sightings_pam/sightings_only_dolphins_atlantic_white_sided__S_prox_fixed_bw10000.png")
+fig_so_common_dol     <- here("output/figs/compare_sightings_pam/sightings_only_dolphins_common__S_prox_fixed_bw10000.png")
+fig_so_risso          <- here("output/figs/compare_sightings_pam/sightings_only_dolphins_risso_s__S_prox_fixed_bw10000.png")
+fig_so_harbour_p      <- here("output/figs/compare_sightings_pam/sightings_only_porpoise_harbour__S_prox_fixed_bw10000.png")
+fig_so_pilot          <- here("output/figs/compare_sightings_pam/sightings_only_whale_long_finned_pilot__S_prox_fixed_bw10000.png")
+fig_so_sperm          <- here("output/figs/compare_sightings_pam/sightings_only_whale_sperm__S_prox_fixed_bw10000.png")
+
+# ==============================================================
+# STUDY AREA MAP
+# Source script: setup/02_build_study_area.R / helper_spatial.R
+# ==============================================================
+fig_study_area        <- here("output/figs/Effort_maps/00_all_cetacean_records.png")
+
+# ==============================================================
+# CSV SUMMARY EXPORTS
+# Add write_csv() calls to each source script (see chunk comments below)
+# ==============================================================
+csv_sightings_summary    <- here("output", "data", "sightings_summary.csv")
+csv_sightings_by_source  <- here("output", "data", "sightings_by_source.csv")
+csv_sightings_by_species <- here("output", "data", "sightings_by_species.csv")
+csv_pam_summary          <- here("output", "data", "pam_summary.csv")
+csv_pam_seasonal         <- here("output", "data", "pam_seasonal_summary.csv")
+csv_conf_overall         <- here("output", "data", "overall_conf_summary.csv")
+csv_conf_target          <- here("output", "data", "target_conf_summary.csv")
+thresholds <- readRDS(here("output/data/sightings_thresholds.rds"))
+
+```
+
+---
+
+# Figures & Plots {#figures}
+
+## Study Area {#study-area}
+
+```{r fig-study-area, fig.cap="Map of study area"}
+# output/figs/proposed_StudyAreamap.png
+# Source: setup/02_build_study_area.R / helper_spatial.R
+show_fig(fig_study_area)
+```
+
+---
+
+## Cetacean Sightings Distribution Maps 2010 - 2024{#sightings-maps}
+
+### WSDB — Opportunistic Sightings
+Species were retained for mapping if they had at least 
+`r thresholds$wsdb` records in the WSDB dataset
+```{r fig-wsdb-facet,  fig.height=8}
+# output/figs/sights/WSDB_Whale_sightings_facet.png
+# Source: 03_plot_combined_sightings.R → Map_Species facet ggsave
+
+show_fig(fig_wsdb_facet)
+```
+
+### Aerial Survey — Systematic Sightings
+Species were retained for mapping if they had at least 
+`r thresholds$aerial` records in the aerial survey dataset
+
+```{r fig-aerial-facet,  fig.height=8}
+# output/figs/sights/Aerial_Whale_sightings_facet.png
+# Source: 03_plot_combined_sightings.R → aerial facet ggsave
+show_fig(fig_aerial_facet)
+```
+
+### Individual Species Maps 2010-2024
+Species shown based on minimum record thresholds
+
+```{r fig-sightings-species, results='asis'}
+# output/figs/sights/WSDB_Sightings_*.png and Aerial_Sightings_*.png
+# Auto-renders all individual species maps present on disk.
+# Source: 03_plot_combined_sightings.R -> per-species loop -> ggsave
+
+sights_dir <- here("output/figs/sights")
+
+clean_sights_label <- function(fname) {
+  fname |>
+    tools::file_path_sans_ext() |>
+    stringr::str_replace("^(WSDB|Aerial)_Sightings_", "\\1 - ") |>
+    stringr::str_replace_all("_", " ") |>
+    stringr::str_to_title() |>
+restore_apostrophes() |>
+    stringr::str_remove_all("'")  # restore first, then strip for safe chunk labels
+  }
+
+sights_species_files <- list.files(
+  sights_dir,
+  pattern    = "^(WSDB|Aerial)_Sightings_.*\\.png$",
+  full.names = TRUE
+)
+
+# Sort NS species to end within each source, matching facet plot order
+ns_last_files <- function(paths) {
+  c(sort(paths[!grepl("_NS_|_Ns_|(NS)", paths)]),
+    sort(paths[grepl("_NS_|_Ns_|(NS)", paths)]))
+}
+
+# Split by source, reorder each, recombine
+wsdb_files   <- ns_last_files(sights_species_files[grepl("^WSDB", basename(sights_species_files))])
+aerial_files <- ns_last_files(sights_species_files[grepl("^Aerial", basename(sights_species_files))])
+sights_species_files <- c(wsdb_files, aerial_files)
+
+if (length(sights_species_files) > 0) {
+  chunks <- lapply(sights_species_files, function(f) {
+    label  <- clean_sights_label(basename(f))
+    f_safe <- gsub("'", "\\'", f, fixed = TRUE)  # escape apostrophes in path
+    knitr::knit_expand(
+      text = paste0(
+        "\n\n#### {{label}}\n\n",
+        strrep("`", 3), "{r echo=FALSE}\n",
+        "knitr::include_graphics(\"{{f_safe}}\")\n",
+        strrep("`", 3), "\n"
+      ),
+      label = label, f_safe = f_safe
+    )
+  })
+  cat(knitr::knit_child(text = unlist(chunks), quiet = TRUE), sep = "\n")
+} else {
+  cat("> *No individual species sightings maps found in `output/figs/sights/`.*\n\n")
+}
+```
+
+---
+
+## Effort & Coverage Maps {#Effort-maps}
+
+### All Cetacean Records — Coverage Density
+
+```{r fig-coverage, fig.cap="Gridded density of all cetacean sightings (25 km grid, log10 scale). OWA boundaries in orange; study area dashed."}
+# output/figs/figs/Effort_maps/00_all_cetacean_records.png
+# Source: 04_summarize_wsdb_effort.R → p_all
+show_fig(fig_coverage)
+```
+
+### Data Confidence Map
+
+```{r fig-confidence, fig.cap="Coverage × temporal consistency confidence index. Green = high confidence."}
+# output/figs/figs/Effort_maps/00_data_consistency.png
+# Source: 04_summarize_wsdb_effort.R → p_conf
+show_fig(fig_confidence)
+```
+
+### Seasonal Sightings — Faceted Map
+
+```{r fig-seasonal-map, fig.cap="Seasonal distribution of all cetacean sightings on 25 km grid (log10 scale). Spring Mar–May, Summer Jun–Aug, Fall Sep–Nov, Winter Dec–Feb.", fig.height=9}
+# output/figs/figs/Effort_maps/00_seasonal_coverage.png
+# Source: 06_summarize_wsdb_seasonality.R → p_seasonal
+show_fig(fig_seasonal_map)
+```
+
+### Seasonal Sightings — Coverage Summary
+
+```{r fig-seasonal-bars, fig.cap=""}
+# output/figs/figs/Effort_maps/00_seasonal_comparison_records_per_km2.png
+# Source: 06_summarize_wsdb_seasonality.R → p_seasonal_bars
+show_fig(fig_seasonal_bars)
+```
+
+---
+
+## Target Species Maps {#target-maps}
+
+### Blue Whale
+
+```{r blue-whale-effort-maps,fig.cap="Blue whale — target records (left) and effort-normalised share (right).", fig.show='hold', out.width='49%',fig.align='center'}
+
+knitr::include_graphics(c(
+  Blue_whale_1_target_records,
+  Blue_whale_2_share
+))
+```
+
+### North Atlantic Right Whale
+
+```{r NARW-effort-maps, fig.cap="NARW — target records (left) and Effort-normalised share (right).", fig.show='hold', out.width='49%',fig.align='center'}
+# output/figs/figs/Effort_maps/NARW_1_target_records.png + _2_share.png
+
+knitr::include_graphics(c(NARW_1_target_records,
+NARW_2_share))
+```
+
+### Shelf Baleen
+
+```{r baleen_maps, fig.cap="Shelf baleen whales — target records and Effort-normalised share.", fig.show='hold', out.width='49%',fig.align='center'}
+# output/figs/figs/Effort_maps/Shelf_baleen_1_target_records.png + _2_share.png
+knitr::include_graphics(c(Shelf_baleen_1_target_records,Shelf_baleen_2_share))
+```
+
+### Deep Divers (Beaked Whales)
+
+```{r beaked_maps, fig.cap="Deep divers — target records and Effort-normalised share.", fig.show='hold', out.width='49%',fig.align='center'}
+# output/figs/figs/Effort_maps/Deep_divers_1_target_records.png + _2_share.png
+knitr::include_graphics(c(Deep_divers_1_target_records,
+Deep_divers_2_share))
+```
+
+### Harbour Porpoise
+
+```{r HP_maps, fig.cap="Harbour porpoise — target records and Effort-normalised share.", fig.show='hold', out.width='49%',fig.align='center'}
+# output/figs/figs/Effort_maps/Harbour_porpoise_1_target_records.png + _2_share.png
+knitr::include_graphics(c(Harbour_porpoise_1_target_records,
+Harbour_porpoise_2_share))
+```
+
+### Small Odontocetes
+
+```{r sm_odontocete_maps, fig.cap="Small odontocetes — target records and Effort-normalised share.", fig.show='hold', out.width='49%',fig.align='center'}
+# output/figs/figs/Effort_maps/Small_odontocetes_1_target_records.png + _2_share.png
+knitr::include_graphics(c(Small_odontocetes_1_target_records,
+Small_odontocetes_2_share))
+```
+
+---
+
+## Data Confidence Summaries {#confidence-figs}
+
+```{r fig-conf-comparison, fig.cap="Confidence comparison across study region vs WEA areas."}
+# output/figs/Effort_maps/confidence_summaries/confidence_comparison.png
+# Source: 05_summarize_wsdb_confidence.R
+show_fig(fig_conf_comparison)
+```
+
+```{r fig-conf-heatmap-WEA, fig.cap="Target species confidence heatmap — WEA areas only."}
+# output/figs/Effort_maps/confidence_summaries/target_confidence_heatmap_WEA.png
+show_fig(fig_conf_heatmap_WEA)
+```
+
+---
+
+## PAM Summaries {#pam-summaries}
+
+### Combined Seasonal Summary 
+
+```{r fig-pam-combined, fig.cap="PAM seasonal summary: detection proportions, detection days", fig.height=10}
+# output/figs/Effort_maps/PAM/combined_seasonal.png
+# Source: 07_summarize_pam_detections.R → combined_seasonal patchwork → ggsave
+show_fig(fig_pam_combined)
+```
+
+### PAM Station Distribution Map
+
+```{r fig-pam-site-map, fig.cap="PAM station locations by season. Point transparency = years sampled. OWA boundaries in orange.", fig.height=9}
+# output/figs/Effort_maps/PAM/Site_figs/Effort_maps_map.png
+# Source: 07_summarize_pam_detections.R → p_map
+show_fig(fig_pam_site_map)
+```
+
+### PAM Station Coverage Map
+
+```{r fig-pam-station-cov, fig.cap="Overall PAM station spatial coverage."}
+# output/figs/Effort_maps/PAM/PAM_station_coverage.png
+# Source: 07_summarize_pam_detections.R → p_pam_range (coverage version)
+show_fig(fig_pam_station_cov)
+```
+
+---
+
+## KDE Outputs {#kde-outputs}
+
+> All KDE figures from `08_run_kde_models.R → performKDE()`
+
+
+### Sightings KDEs — Family Groups
+
+```{r fig-kde-mysticetes, fig.cap="Sightings: Mysticetes (all baleen whales)"}
+# output/figs/KDE_maps/KDE_sightings_mysticetes_Mysticetes_(All_Baleen_Whales)_fixed_bw10000.png
+show_fig(fig_kde_sights_mysticetes)
+```
+
+```{r fig-kde-odontocetes, fig.cap="Sightings: Odontocetes (all toothed whales)"}
+# output/figs/KDE_maps/KDE_sightings_odontocetes_Odontocetes_(All_Toothed_Whales)_fixed_bw10000.png
+show_fig(fig_kde_sights_odontocetes)
+```
+
+### Sightings KDEs — Individual Species (proximity-weighted)
+Species shown reflect whatever passed `min_records_species` in `08_run_kde_models.R` at last run — threshold changes are automatically reflected.
+
+```{r fig-kde-sights-species, results='asis'}
+# output/figs/KDE_maps/KDE_sightings_species_proximity_*.png
+# Auto-renders all individual sightings KDEs on disk.
+# Source: 08_run_kde_models.R → performKDE() → ggsave
+
+kde_sights_files <- list.files(
+  here("output/figs/"),
+  pattern    = "^KDE_sightings_species_proximity_.*\\.png$",
+  full.names = TRUE
+)
+
+clean_kde_label <- function(fname) {
+  fname |>
+    tools::file_path_sans_ext() |>
+    stringr::str_remove("^KDE_sightings_species_proximity_") |>
+    stringr::str_remove("_fixed_bw\\d+$") |>
+    stringr::str_replace_all("_", " ") |>
+    stringr::str_to_title() |>
+restore_apostrophes() |>
+    stringr::str_remove_all("'")  # restore first, then strip for safe chunk labels
+  }
+
+if (length(kde_sights_files) > 0) {
+  chunks <- lapply(kde_sights_files, function(f) {
+    label  <- clean_kde_label(basename(f))
+    f_safe <- gsub("'", "\\'", f, fixed = TRUE)  # escape apostrophes in path
+    knitr::knit_expand(
+      text = c(
+        "\n\n#### {{label}}\n\n",
+        "```{r echo=FALSE}",
+        "knitr::include_graphics(\"{{f_safe}}\")",
+        "```\n"
+      ),
+      label = label, f_safe = f_safe
+    )
+  })
+  cat(knitr::knit_child(text = unlist(chunks), quiet = TRUE), sep = "\n")
+} else {
+  cat("> *No individual sightings KDE PNGs found in `output/figs/`.*\n\n")
+}
+```
+
+### PAM KDEs — Baleen Whales 
+- weighted by proportion of detection days
+
+```{r fig-kde-pam-blue, fig.cap="PAM Blue whale (Bm)"}
+# output/figs/KDE_maps/KDE_pam_baleen_Blue_Whale_Bm_fixed_bw10000.png
+show_fig(fig_kde_pam_blue)
+```
+
+```{r fig-kde-pam-fin, fig.cap="PAM Fin whale (Bp) "}
+show_fig(fig_kde_pam_fin)
+```
+
+```{r fig-kde-pam-humpback, fig.cap="PAM Humpback whale (Mn) "}
+show_fig(fig_kde_pam_humpback)
+```
+
+```{r fig-kde-pam-minke, fig.cap="PAM Minke whale (Ba) "}
+show_fig(fig_kde_pam_minke)
+```
+
+```{r fig-kde-pam-narw, fig.cap="PAM North Atlantic right whale (Eg) "}
+show_fig(fig_kde_pam_narw)
+```
+
+```{r fig-kde-pam-sei, fig.cap="PAM: Sei whale (Bb)"}
+show_fig(fig_kde_pam_sei)
+```
+
+### PAM KDEs — Beaked Whales
+- weighted by proportion of detection days
+
+
+```{r fig-kde-pam-zc, fig.cap="PAM Goose beaked whale (Zc) "}
+show_fig(fig_kde_pam_zc)
+```
+
+```{r fig-kde-pam-ha, fig.cap="PAM Northern bottlenose whale (Ha) "}
+show_fig(fig_kde_pam_ha)
+```
+
+```{r fig-kde-pam-mb, fig.cap="PAM Sowerby's beaked whale (Mb) "}
+show_fig(fig_kde_pam_mb)
+```
+
+```{r fig-kde-pam-mmme, fig.cap="PAM True's / Gervais' beaked whale (MmMe) "}
+show_fig(fig_kde_pam_mmme)
+```
+
+### Grouped PAM KDEs
+
+```{r fig-kde-grouped-baleen, fig.cap="PAM All baleen whales grouped "}
+# output/figs/KDE_maps/KDE_pam_grouped_baleen_All_Baleen_Whales_(PAM)_fixed_bw10000.png
+show_fig(fig_kde_grouped_baleen)
+```
+
+```{r fig-kde-grouped-beaked, fig.cap="PAM All beaked whales grouped "}
+# output/figs/KDE_maps/KDE_pam_grouped_beaked_All_Beaked_Whales_(PAM)_fixed_bw10000.png
+show_fig(fig_kde_grouped_beaked)
+```
+
+---
+
+## PAM vs Sightings Comparison Maps {#comparison-maps}
+
+> Source: `10_compare_kde_pam_vs_sightings.R` → `output/figs/compare_sightings_pam/`
+> Filename convention: `compare_<species>__S_<method>__P_<method>.png` (side-by-side),
+> `pam_only_<species>__P_<method>.png`, `sightings_only_<species>__S_<method>.png`.
+> All files present on disk are rendered — species added/removed in the script are automatically reflected.
+
+```{r fig-compare-all, results='asis'}
+# output/figs/compare_sightings_pam/*.png
+# Auto-renders all comparison figures on disk, grouped by type.
+# Source: 10_compare_kde_pam_vs_sightings.R → create_comparison_map() → ggsave
+
+cmp_dir <- here("output/figs/compare_sightings_pam")
+
+clean_cmp_label <- function(fname) {
+  fname |>
+    tools::file_path_sans_ext() |>
+    stringr::str_remove("__(S|P)_.*$") |>   # strip method suffix
+    stringr::str_replace_all("_", " ") |>
+    stringr::str_to_title() |>
+    stringr::str_remove_all("'")  # remove apostrophes — break chunk header parsing
+}
+
+cmp_files <- list.files(cmp_dir, pattern = "\\.png$", full.names = TRUE)
+
+# Group by prefix type for clear section headers
+compare_files   <- cmp_files[stringr::str_detect(basename(cmp_files), "^compare_")]
+pam_only_files  <- cmp_files[stringr::str_detect(basename(cmp_files), "^pam_only_")]
+sights_only_files <- cmp_files[stringr::str_detect(basename(cmp_files), "^sightings_only_")]
+
+render_group <- function(files, heading) {
+  if (length(files) == 0) return(invisible())
+  cat(paste0("\n\n### ", heading, "\n\n"))
+  chunks <- lapply(files, function(f) {
+    label  <- clean_cmp_label(basename(f))
+    f_safe <- gsub("'", "\\'", f, fixed = TRUE)  # escape apostrophes in path
+    knitr::knit_expand(
+      text = c(
+        "\n\n#### {{label}}\n\n",
+        "```{r echo=FALSE}",
+        "knitr::include_graphics(\"{{f_safe}}\")",
+        "```\n"
+      ),
+      label = label, f_safe = f_safe
+    )
+  })
+  cat(knitr::knit_child(text = unlist(chunks), quiet = TRUE), sep = "\n")
+}
+
+if (length(cmp_files) == 0) {
+  cat("> *No comparison PNGs found in `output/figs/compare_sightings_pam/`. Run `10_compare_kde_pam_vs_sightings.R`.*\n\n")
+} else {
+  render_group(compare_files,     "Side-by-side PAM vs Sightings")
+  render_group(pam_only_files,    "PAM Only (no sightings KDE available)")
+  render_group(sights_only_files, "Sightings Only (no PAM KDE available)")
+}
+```
+
+---
+
+# Key Parameters & Analytical Decisions {#parameters}
+
+```{r params-table}
+# ---- Key Parameters ----
+# Read live from CSVs exported by each source script.
+# If a file is missing, re-run the relevant script to regenerate it.
+
+param_files <- c(
+  here("output/data/params_kde.csv"),
+  here("output/data/params_figs/Effort_maps.csv"),
+  here("output/data/params_dedup.csv"),
+  here("output/data/params_compare.csv")
+)
+
+params_df <- purrr::map(param_files, \(f) {
+  if (file.exists(f)) {
+    readr::read_csv(f, show_col_types = FALSE, col_types = readr::cols(.default = "c"))
+  } else {
+    message("Missing params file — re-run source script: ", basename(f))
+    NULL
+  }
+}) |>
+  purrr::compact() |>
+  dplyr::bind_rows()
+
+knitr::kable(
+  params_df,
+  caption   = "Key parameters and analytical decisions — live from source scripts",
+  col.names = c("Parameter", "Value", "Script", "Notes"),
+  align     = c("l", "r", "l", "l")
+) %>%
+  kableExtra::kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = TRUE,
+    font_size  = 13
+  ) %>%
+  kableExtra::column_spec(1, bold = TRUE, width = "16em") %>%
+  kableExtra::column_spec(2, width = "8em") %>%
+  kableExtra::column_spec(3, italic = TRUE, width = "16em")
+```
+
+---
+
+# Summary Statistics {#summary-stats}
+
+> Summary stats are read from lightweight CSV exports.
+> If a CSV is missing, add a `write_csv()` call to the relevant script and re-run it once.
+> The path expected for each file is shown in the fallback message.
+
+## Sightings Data {#sightings-stats}
+
+```{r summary-sightings}
+# ---- Summary: sightings dataset ----
+# Expected file: output/data/sightings_summary.csv
+
+df_sights <- read_csv_safe(csv_sightings_summary)
+if (!is.null(df_sights)) {
+  knitr::kable(df_sights, caption = "Sightings dataset overview") %>%
+    kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                              full_width = FALSE)
+}
+```
+
+### Records by Source
+
+```{r summary-source-table}
+# ---- Summary: records by source ----
+# Expected file: output/data/sightings_by_source.csv
+
+df_source <- read_csv_safe(csv_sightings_by_source)
+if (!is.null(df_source)) {
+  knitr::kable(df_source,
+             caption   = "Records by data source (post-deduplication, clipped to study area)",
+             col.names = c("Source", "N Records", "N Species Codes", "N Species (NS)", "Date Range")) %>%
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+}
+```
+
+### Species Record Counts
+
+```{r summary-species-counts}
+# ---- Summary: records by species ----
+# Expected file: output/data/sightings_by_species.csv
+
+
+df_sp <- read_csv_safe(csv_sightings_by_species)
+if (!is.null(df_sp)) {
+  knitr::kable(df_sp,
+               caption   = "Most frequently recorded species/groups",
+               col.names = c("Common Name", "N Records")) %>%
+    kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                              full_width = FALSE)
+}
+```
+
+---
+
+## PAM Data {#pam-stats}
+
+```{r summary-pam}
+# ---- Summary: PAM detection summary ----
+# Expected file: output/data/pam_summary.csv
+
+
+df_pam <- read_csv_safe(csv_pam_summary)
+if (!is.null(df_pam)) {
+  knitr::kable(df_pam,
+               caption   = "PAM detection summary by species (all sites, all seasons)",
+               col.names = c("Species Code", "N Sites", "Total Days Sampled",
+                             "Detection Days", "Detection Rate")) %>%
+    kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                              full_width = FALSE)
+}
+```
+
+### Seasonal PAM Summary (Study Area Stations)
+
+```{r pam-seasonal-summary}
+# ---- Summary: seasonal PAM coverage ----
+# Expected file: output/data/pam_seasonal_summary.csv
+
+
+df_pam_season <- read_csv_safe(csv_pam_seasonal)
+if (!is.null(df_pam_season)) {
+  knitr::kable(df_pam_season,
+               caption   = "Seasonal coverage summary for study-area PAM stations",
+               col.names = c("Season", "N Stations", "N Detection Days", "N Years")) %>%
+    kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                              full_width = FALSE)
+}
+```
+
+---
+
+## Data Confidence Summary {#confidence-stats}
+
+```{r conf-summary}
+# ---- Summary: overall confidence ----
+# Expected file: output/data/overall_conf_summary.csv
+
+df_conf <- read_csv_safe(csv_conf_overall)
+if (!is.null(df_conf)) {
+  knitr::kable(df_conf,
+               caption = "Overall data confidence: study region vs WEAs",
+               digits  = 1) %>%
+    kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+}
+```
+
+### Target Species Confidence (WEA Areas)
+
+```{r target-conf-summary}
+# ---- Summary: target species confidence ----
+# Expected file: output/data/target_conf_summary.csv
+
+
+df_conf_target <- read_csv_safe(csv_conf_target)
+if (!is.null(df_conf_target)) {
+  knitr::kable(df_conf_target,
+               caption = "Target species/group confidence within WEAs",
+               digits  = 1) %>%
+    kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+}
+```
+
+###Seasonal summary
+```{r seasonal-setup, include=FALSE}
+# ==============================================================================
+# Laura Joan Feyrer
+# Date Updated: 2026-03-12
+# Chunk: seasonal_confidence_chunk.Rmd
+# Description: Reads the seasonal summary CSV produced by 04_summarize_wsdb_effort.R and
+#              renders (1) a formatted kable table of mean records/year by
+#              season x species group x region, and (2) a bar chart showing
+#              each species group's seasonal records as a percentage of total
+#              all-cetacean records in that region and season. Deep divers
+#              excluded (0 WEA records). Requires:
+#                output/data/seasonal_summary_WEA_vs_study.csv
+#                dt object in session (from 04_summarize_wsdb_effort.R) for seasonal totals
+# Changes from previous version:
+#   - Table changed from total records to mean records/year per species group
+#     per season -- more comparable across groups of different abundance.
+#   - Plot changed from raw counts to percentage of total cetacean records in
+#     that region x season -- controls for summer dominance in figs/Effort_maps coverage.
+#   - Removed cross-species seasonal average table (not sufficiently informative).
+# ==============================================================================
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(knitr)
+library(kableExtra)
+library(readr)
+library(here)
+conflicted::conflicts_prefer(
+  dplyr::filter,
+  dplyr::select,
+  dplyr::mutate,
+  dplyr::lag
+)
+
+
+# ---- Load seasonal summary ------------------------------------------------------
+
+seasonal_wide <- readr::read_csv(
+  here("output", "data", "seasonal_summary_WEA_vs_study.csv"),
+  show_col_types = FALSE
+)
+# ---- Load all-cetacean seasonal totals (written by 04_summarize_wsdb_effort.R Section 15) ----
+# These are raw totals across all species before any guild grouping, so there
+# is no double-counting from guild rows inflating the denominator.
+all_cet_seasonal <- readr::read_csv(
+  here("output", "data", "all_cet_seasonal_totals.csv"),
+  show_col_types = FALSE
+) %>%
+  mutate(
+    season = factor(season, levels = c("Spring", "Summer", "Fall", "Winter")),
+    region = factor(region, levels = c("Study Region", "WEA"))
+  )
+
+# ---- Pivot species summary to long and calculate metrics ------------------------
+
+seasonal_long <- seasonal_wide %>%
+  tidyr::pivot_longer(
+    cols          = -c(target_label, region),
+    names_to      = c("season", ".value"),
+    names_pattern = "^(Spring|Summer|Fall|Winter)_(.+)$"
+  ) %>%
+  dplyr::mutate(
+    season       = factor(season, levels = c("Spring", "Summer", "Fall", "Winter")),
+    region       = factor(region, levels = c("Study Region", "WEA")),
+    target_label = factor(target_label, levels = c(
+      "North Atlantic Right Whale",
+      "Blue Whale",
+      "Baleen Whales (guild)",
+      "Harbour Porpoise",
+      "Small Odontocetes (guild)"
+    ))
+  ) %>%
+  dplyr::filter(!is.na(season)) %>%
+  dplyr::filter(!grepl("Deep Diver", target_label, ignore.case = TRUE)) %>%
+  # Mean records per detection-year: total records / years with detections
+  # Zero where no detections recorded in that season x region
+  dplyr::mutate(
+    mean_per_year = ifelse(n_years > 0, round(n_records / n_years, 1), 0)
+  ) %>%
+  # Join all-cetacean seasonal totals and calculate % of total cetacean records
+  left_join(all_cet_seasonal, by = c("region", "season")) %>%
+  dplyr::mutate(
+    pct_of_cet = ifelse(
+      !is.na(total_all_cet) & total_all_cet > 0,
+      round(100 * n_records / total_all_cet, 1),
+      NA_real_
+    )
+  )
+```
+
+### Seasonal distribution of sightings: WEA vs study region
+
+Sightings of priority cetacean species and guilds were dplyr::summarised by season
+(spring: March--May; summer: June--August; fall: September--November; winter:
+December--February) across the full study region and within WEA grid cells
+(cells with $\geq$ 25% overlap with designated WEA polygons). WEA records
+are a spatial subset of study region records.
+
+```{r seasonal-table, echo=FALSE, message=FALSE, warning=FALSE}
+# ---- Table: mean records per detection-year by species x season x region --------
+# Mean records/year accounts for uneven detection frequency across groups and
+# seasons. More interpretable than raw totals for a multi-species summary.
+# Cell format: mean records/yr (n years with detections).
+
+table_data <- seasonal_long %>%
+  dplyr::mutate(
+    cell_val = ifelse(
+      n_years > 0,
+      paste0(mean_per_year, " (", n_years, " yr)"),
+      "0"
+    )
+  ) %>%
+  select(target_label, region, season, cell_val) %>%
+  tidyr::pivot_wider(names_from = c(region, season), values_from = cell_val) %>%
+  select(
+    target_label,
+    `Study Region_Spring`, `Study Region_Summer`,
+    `Study Region_Fall`,   `Study Region_Winter`,
+    `WEA_Spring`,          `WEA_Summer`,
+    `WEA_Fall`,            `WEA_Winter`
+  ) %>%
+  rename("Species / Group" = target_label)
+
+kable(
+  table_data,
+  caption = "Mean records per detection-year by season for priority cetacean
+             species and guilds. Values show mean annual records (number of
+             years with detections in parentheses); zero indicates no records
+             in that season and region. Study Region covers the full analysis
+             area; WEA values are a spatial subset (grid cells with >= 25%
+             overlap with designated WEA polygons).",
+  col.names = c(
+    "Species / Group",
+    "Spring", "Summer", "Fall", "Winter",
+    "Spring", "Summer", "Fall", "Winter"
+  ),
+  align    = c("l", rep("c", 8)),
+  booktabs = TRUE
+) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "condensed"),
+    full_width        = TRUE,
+    font_size         = 11
+  ) %>%
+  add_header_above(c(
+    " "            = 1,
+    "Study Region" = 4,
+    "WEA"          = 4
+  )) %>%
+  row_spec(0, bold = TRUE) %>%
+  column_spec(1, bold = TRUE, width = "18em")
+```
+
+```{r seasonal-plot, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=6, fig.cap="Seasonal sightings of priority cetacean species and guilds expressed as a percentage of total cetacean records in each region and season. Study Region (blue) covers the full analysis area; WEA (orange) is a spatial subset. Normalising to total cetacean figs/Effort_maps controls for the strong summer dominance in observer coverage, allowing seasonal patterns to be compared across groups. Seasons with zero records are omitted from bars."}
+# ---- Bar chart: % of total cetacean records by season x species x region --------
+# Normalising to total cetacean records per region x season controls for uneven
+# observer figs/Effort_maps, making winter and spring detections visible relative to summer.
+
+plot_data <- seasonal_long %>%
+  dplyr::filter(n_records > 0, !is.na(pct_of_cet))
+
+ggplot(plot_data, aes(x = season, y = pct_of_cet, fill = region)) +
+  geom_col(
+    position = position_dodge(width = 0.75),
+    width    = 0.65,
+    alpha    = 0.9
+  ) +
+  geom_text(
+    aes(label = paste0(pct_of_cet, "%")),
+    position = position_dodge(width = 0.75),
+    vjust    = -0.4,
+    size     = 2.6,
+    color    = "grey30"
+  ) +
+  scale_fill_manual(
+    values = c("Study Region" = "#6baed6", "WEA" = "#fd8d3c"),
+    name   = NULL
+  ) +
+  scale_y_continuous(
+    labels = function(x) paste0(x, "%"),
+    expand = expansion(mult = c(0, 0.18))
+  ) +
+  facet_wrap(~ target_label, scales = "free_y", ncol = 3) +
+  labs(
+    x       = NULL,
+    y       = "% of total cetacean records",
+    caption = paste0(
+      "Percentage = (species group records) / (all cetacean records) per region x season. ",
+      "WEA = grid cells with >= 25% overlap with designated WEA polygons (25 km grid)."
+    )
+  ) +
+  theme_bw(base_size = 11) +
+  theme(
+    strip.text         = element_text(size = 9, face = "bold"),
+    legend.position    = "top",
+    axis.text.x        = element_text(angle = 35, hjust = 1),
+    panel.grid.major.x = element_blank(),
+    plot.caption       = element_text(size = 8, color = "grey40", hjust = 0)
+  )
+```
+
+
+
+---
+
+# Script Structure & Logic Flow {#script-structure}
+
+<details>
+<summary>Click to expand — overview of all scripts and their section structure</summary>
+
+**`setup/02_build_study_area.R`**
+- One-time setup script; rebuild only if source spatial boundaries change.
+- Load EEZ, NAFO, coastline, WEA shapefiles
+- dplyr::filter NAFO to divisions 4V and 4W; union to single polygon
+- Clip to WEA regional assessment study area
+
+**`01_clean_aerial_sightings.R`**
+- Read raw aerial survey data from `input/raw_data/aerial/`
+- Standardize fields, filter marine mammals, deduplicate aerial observations
+- Save processed aerial sightings to `input/processed_data/aerial/`
+
+**`02_prepare_combined_sightings.R`**
+- Configuration: file paths, spatial CRS, 1 km cell size
+- Helper functions: WSDB datetime parser, HHMM time parser, grid cell ID creator
+- Read reference data (WSDB species codes, aerial→WSDB species lookup)
+- Read & standardize aerial data; read & standardize WSDB data; combine datasets
+- Create 1 km spatial grid cells (UTM Zone 20N)
+- Deduplication: 1 record per species per day per 1 km cell
+- Deduplication summary statistics
+- Save combined and deduplicated outputs + **`write_csv()` to `output/data/`**
+
+**`03_plot_combined_sightings.R`**
+- Load standard spatial layers via `helpers/helper_spatial.R`; read combined sightings CSV
+- Define bounding box, create point shapefile, clip to study area
+- dplyr::filter: cetacean codes only, not on land, ≥50 records
+- Loop: generate per-species sightings maps → `ggsave`
+- Facet map of all species → **`ggsave("output/figs/Map_Species...")`**
+
+**`04_summarize_wsdb_effort.R`**
+- Setup: packages, configuration (grid size, year range, target species, palette)
+- Data loading & cleaning; grid cell calculation (25 km UTM cells)
+- Load spatial layers; spatial tagging
+- Aggregate: all cetacean records per grid cell → `cell_all`
+- Confidence index: coverage quantiles × temporal consistency
+- Coverage map → **`ggsave("output/figs/figs/Effort_maps/p_all...")`**
+- Confidence map → **`ggsave("output/figs/figs/Effort_maps/p_conf...")`**
+- Target species mapping; individual species maps
+
+**`05_summarize_wsdb_confidence.R`**
+- Requires `cell_all` and `targets` from `04_summarize_wsdb_effort.R`
+- Confidence metrics function + target-specific metrics function
+- Compile `overall_conf_summary`, `target_conf_summary`
+- Save CSVs + visualisations (confidence comparison bar chart, target heatmap)
+- **`write_csv()` to `output/data/`**
+
+**`06_summarize_wsdb_seasonality.R`**
+- Requires `dt` and `cell_m` from `04_summarize_wsdb_effort.R`
+- Classify records by season; aggregate to seasonal grid summaries
+- Seasonal faceted map → **`ggsave("output/figs/...")`**
+- Seasonal bar chart → **`ggsave("output/figs/...")`**
+
+**`07_summarize_pam_detections.R`**
+- Read baleen presence CSV; assign seasons; compute seasonal detection summaries
+- Plots p1–p5 → **`ggsave("output/figs/Effort_maps/PAM/...")`**
+- Site distribution map by season → **`ggsave("output/figs/Effort_maps/PAM/...")`**
+- PAM station acoustic coverage scenarios → **`ggsave("output/figs/Effort_maps/PAM/...")`**
+- **`write_csv()` to `output/data/`**
+
+**`08_run_kde_models.R`**
+- Configuration, helper functions, KDE pipeline
+- Output: rasters to `output/tif/`, shapefiles to `output/shapes/q90/`, plots to `output/figs/`
+
+**`09_create_kde_contours.R`** — Batch multi-level contour shapefiles
+
+**`10_compare_kde_pam_vs_sightings.R`**
+- PAM vs sightings comparison maps → `output/figs/compare_sightings_pam/`
+
+**`11_compare_kde_legacy.R`**
+- Legacy PAM vs sightings comparison workflow retained for reference.
+
+**`Studyareaclip_cetaceanfamily.r`** — Clips to study area, classifies by family
+
+</details>
+
+---
+
+*Report generated with `rmarkdown::render()`. To re-knit:*
+
+```r
+rmarkdown::render("KDE_PAM_cetaceans_report.Rmd")
+```
+
+*To regenerate CSV summary files (one-time, then report reads from disk):*
+
+```r
+# Add write_csv() calls to each script as noted in chunk comments above,
+# then source() each script once. The report will read CSVs on all future knits.
+```
