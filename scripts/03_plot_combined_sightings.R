@@ -31,6 +31,20 @@ pacman::p_load(
   sf, tidyverse, here, scales, ggspatial, RColorBrewer
 )
 
+if (requireNamespace("conflicted", quietly = TRUE)) {
+  conflicted::conflicts_prefer(
+    dplyr::filter,
+    dplyr::select,
+    dplyr::mutate,
+    dplyr::arrange,
+    dplyr::summarise,
+    dplyr::rename,
+    lubridate::year,
+    lubridate::month,
+    .quiet = TRUE
+  )
+}
+
 
 # ---- 2. Input file ---------------------------------------------------------------
 
@@ -138,15 +152,9 @@ cat(sprintf("    Aerial only:       %d\n", length(base::setdiff(aerial_sp_all, w
 cat("=================================================================\n\n")
 
 
-# ---- 6. Shared palette — WHALE_PALETTE by common name ----------------------------
-# Single palette for all cetaceans, keyed by common name (no Latin initials).
-#   Baleen:             blue-teal family
-#   Beaked:             warm sandy-earth family
-#   Dolphins/odontocetes: Spectral darks (pale yellows removed)
-#   NS groups:          grey-to-brown ramp, cross/x shapes
-#
-# Keep WHALE_PALETTE in sync with 07_summarize_pam_detections.R.
-# Missing species trigger a warning naming exactly what needs to be added.
+# ---- 6. Shared species palette and shapes ---------------------------------------
+# WHALE_PALETTE is sourced from scripts/helpers/helper_palettes.R.
+# NS groups use a generated grey-to-brown ramp plus cross/x shapes.
 
 base_shapes <- c(21, 22, 23, 24, 25, 15, 8, 20, 18)
 
@@ -155,31 +163,6 @@ named_species <- all_species[!grepl("\\(NS\\)", all_species)]
 ns_species    <- all_species[grepl("\\(NS\\)", all_species)]
 n_ns          <- length(ns_species)
 
-WHALE_PALETTE <- c(
-  # ── Baleen: blue-teal family ──────────────────────────────────────────────
-  "Blue Whale"                   = "#3288BD",
-  "Fin Whale"                    = "#276B95",
-  "Sei Whale"                    = "#2A5857",
-  "Fin/Sei Whale"                = "#7AB0C0",  # intermediate between Fin and Sei
-  "Humpback Whale"               = "#6DAFB1",
-  "Minke Whale"                  = "#9bc4f8",
-  "North Atlantic Right Whale"   = "#7C6FB3",
-  # ── Beaked: warm sandy-earth family ──────────────────────────────────────
-  "Northern Bottlenose Whale"    = "#B07D62",
-  "Sowerby's Beaked Whale"       = "#8B6B4E",
-  "Cuvier's Beaked Whale"        = "#C9A97A",
-  "True's/Gervais' Beaked Whale" = "#7A6651",
-  # ── Dolphins & other odontocetes: Spectral darks, no pale yellows ─────────
-  "Common Dolphin" = "#D4715A",
-  "Atlantic Bottlenose Dolphin" = "#D53E4F",
-  "Atlantic White-Sided Dolphin" = "#E57A7D",
-  "White-Beaked Dolphin" = "#5FA882",
-  "Striped Dolphin" = "#66C2A5",
-  "Risso's Dolphin" = "#A8627A",
-  "Long-Finned Pilot Whale" = "#5C3566",
-  "Sperm Whale" = "#2C6E8A",
-  "Harbour Porpoise" = "#E08830"
-)
 # Warn if any species in the data are not covered — add them to WHALE_PALETTE
 missing_spp <- named_species[!named_species %in% names(WHALE_PALETTE)]
 if (length(missing_spp) > 0) {

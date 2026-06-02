@@ -2,8 +2,8 @@
 # Laura Joan Feyrer
 # Date Updated: 2026-03-12
 # Script: 04_summarize_wsdb_effort.R
-# Description: Generates gridded maps of cetacean sightings from opportunistic
-#              vessel survey data. Produces: (1) an all-cetacean coverage map,
+# Description: Generates gridded maps of cetacean sightings from wsdb and aerial
+#              survey data. Produces: (1) an all-cetacean coverage map,
 #              (2) a data confidence/consistency map, (3) raw-count and
 #              effort-normalised maps for each target species group, and
 #              (4) individual species maps. Also outputs a species-level
@@ -23,7 +23,7 @@ suppressWarnings(source(here::here("scripts/00_load_helpers.R")))
 # ---- 1. Configuration -----------------------------------------------------------
 
 # Performance options
-use_datatable <- TRUE     # Faster aggregation with data.table
+use_datatable <- FALSE    # Keep data handling in tidyverse/tibble pipelines
 use_parallel  <- TRUE     # Parallel processing for multiple targets
 
 # Toggle survey area overlay (5 km WEA buffer shapefile)
@@ -51,7 +51,7 @@ study_area_path      <- spatial_path("study_area")
 land_path            <- spatial_path("land")
 
 # Map styling
-WEA_color    <- "#FF6B35"
+WEA_color    <- MAP_LAYER_STYLE$wea_color
 WEA_alpha    <- 0.3
 WEA_linewidth <- 1
 map_width    <- 10
@@ -70,9 +70,8 @@ targets <- list(
   Blue_whale        = "Balaenoptera\\s+musculus|BLUE\\s+WHALE",
   Shelf_baleen      = "Megaptera|HUMPBACK|acutorostrata|MINKE|physalus|FIN\\s+WHALE|borealis|SEI|musculus|BLUE|glacialis|RIGHT|RORQUAL|BALEEN",
   Harbour_porpoise  = "Phocoena\\s+phocoena|HARBOU?R\\s+PORPOISE",
-  Small_odontocetes = "DOLPHIN|Delphin|Stenella|Tursiops|Lagenorhynchus|Grampus|WHITE[-\\s]?SIDED|WHITE[-\\s]?|PILOT|Phocoena\\s+phocoena|HARBOU?R\\s+PORPOISE",
-  Deep_divers       = "Mesoplodon|Hyperoodon|Ziphius|BEAKED\\s+WHALE|SOWERBY|CUVIER|BOTTLENOSE"
-)
+  Small_odontocetes = "DOLPHIN|Delphin|Stenella|Tursiops|Lagenorhynchus|Grampus|WHITE[-\\s]?SIDED|WHITE[-\\s]?BEAKED|PILOT|Phocoena\\s+phocoena|HARBOU?R\\s+PORPOISE|KILLER|ORCA|Orcinus\\s+orca",
+  Deep_divers = "Mesoplodon|Hyperoodon|Ziphius|Physeter|SPERM\\s+WHALE|BEAKED\\s+WHALE|SOWERBY|CUVIER|BOTTLENOSE")
 
 # Human-readable titles
 target_titles <- list(
@@ -96,7 +95,14 @@ target_palettes <- list(
 
 # Species-level map settings
 species_field       <- "common_name"
-appendix_xlsx       <- file.path(out_dir, "APPENDIX_species_summary.xlsx")
+tables_dir          <- here::here("output/tables")
+appendix_xlsx       <- file.path(tables_dir, "APPENDIX_species_summary.xlsx")
+appendix_wea_csv    <- here::here("output/data/appendix_a_table1_wea_documented_species.csv")
+appendix_comp_csv   <- here::here("output/data/appendix_a_table2_wea_comparability.csv")
+appendix_comp_stats_csv <- here::here("output/data/appendix_a_table2_wea_comparability_stats.csv")
+appendix_species_status_csv <- here::here("output/data/appendix_a_wea_species_status.csv")
+wea_10km_species_csv <- here::here("output/data/wea_10km_species_occurrence_summary.csv")
+wea_10km_area_csv <- here::here("output/data/wea_10km_area_summary.csv")
 make_species_maps   <- TRUE
 top_n_species_maps  <- 30
 species_map_dir     <- file.path(out_dir, "species_maps")
@@ -104,24 +110,37 @@ species_map_bins    <- c(0, 5, 25, 50, 100, Inf)
 species_map_labels  <- c("1-5", "6-25", "26-50", "51-100", "100+")
 exclude_zero_WEA    <- TRUE
 exclude_beaked_whales <- TRUE
+documented_buffer_km <- 10
+documented_min_records <- 2
+documented_min_years <- 2
 
 
 # ---- 2. Packages ----------------------------------------------------------------
 
 setup_packages <- function() {
   pkgs <- c("dplyr", "readr", "lubridate", "ggplot2", "stringr",
-            "tidyr", "sf", "ggspatial", "ggpattern", "writexl", "png", "here")
-  if (exists("use_datatable") && use_datatable) pkgs <- c(pkgs, "data.table")
+            "tidyr", "sf", "ggspatial", "ggpattern", "writexl", "png", "here",
+            "conflicted")
   if (exists("use_parallel")  && use_parallel)  pkgs <- c(pkgs, "future", "furrr")
   to_install <- pkgs[!pkgs %in% installed.packages()[, "Package"]]
   if (length(to_install) > 0) {
     message("Installing: ", paste(to_install, collapse = ", "))
     install.packages(to_install)
   }
-  invisible(lapply(pkgs, library, character.only = TRUE))
+  old_conflicts_policy <- getOption("conflicts.policy")
+  on.exit(options(conflicts.policy = old_conflicts_policy), add = TRUE)
+  options(conflicts.policy = NULL)
+
+  invisible(lapply(
+    pkgs,
+    library,
+    character.only = TRUE,
+    warn.conflicts = FALSE
+  ))
 }
 
 setup_packages()
+dir.create(tables_dir, showWarnings = FALSE, recursive = TRUE)
 
 # Resolve conflicts explicitly -- parallel workers do not inherit session
 # conflict preferences so these must be declared before furrr::future_walk.
@@ -131,6 +150,10 @@ conflicted::conflicts_prefer(dplyr::filter,      .quiet = TRUE)
 conflicted::conflicts_prefer(dplyr::select,      .quiet = TRUE)
 conflicted::conflicts_prefer(dplyr::mutate,      .quiet = TRUE)
 conflicted::conflicts_prefer(dplyr::between,     .quiet = TRUE)
+
+parallel_workers <- function(n_tasks) {
+  min(n_tasks, max(1L, future::availableCores() - 1L))
+}
 
 
 # ---- 3. Helper functions --------------------------------------------------------
@@ -147,13 +170,13 @@ longest_streak <- function(years_vec) {
 }
 
 # Standardised map theme
-theme_map <- function() {
+theme_map <- function(show_axes = FALSE) {
   theme_minimal(base_size = 12) +
     theme(
       panel.grid   = element_blank(),
       panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5),
-      axis.text    = element_blank(),
-      axis.ticks   = element_blank(),
+      axis.text    = if (show_axes) element_text(size = 10, color = "grey20") else element_blank(),
+      axis.ticks   = if (show_axes) element_line(color = "grey30", linewidth = 0.3) else element_blank(),
       axis.title   = element_blank(),
       plot.title    = element_text(size = 14, face = "bold"),
       plot.subtitle = element_text(size = 10),
@@ -167,7 +190,8 @@ theme_map <- function() {
 add_spatial_layers <- function(p, land, WEA_wind, study_area,
                                survey_area = NULL, use_survey_overlay = FALSE) {
   if (!is.null(land)) {
-    p <- p + geom_sf(data = land, fill = "grey60", color = NA, inherit.aes = FALSE)
+    p <- p + geom_sf(data = land, fill = MAP_LAYER_STYLE$land_fill,
+                     color = MAP_LAYER_STYLE$land_color, inherit.aes = FALSE)
   }
   if (use_survey_overlay && !is.null(survey_area)) {
     p <- p + geom_sf(data = survey_area, fill = NA, color = "blue",
@@ -175,11 +199,12 @@ add_spatial_layers <- function(p, land, WEA_wind, study_area,
                      linewidth = 0.6, inherit.aes = FALSE)
   } else if (!is.null(WEA_wind)) {
     p <- p + geom_sf(data = WEA_wind, fill = NA, color = WEA_color,
-                     linetype = "dashed", alpha = WEA_alpha,
+                     alpha = WEA_alpha,
                      linewidth = WEA_linewidth, inherit.aes = FALSE)
   }
   if (!is.null(study_area)) {
-    p <- p + geom_sf(data = study_area, fill = NA, color = "black",
+    p <- p + geom_sf(data = study_area, fill = NA,
+                     color = MAP_LAYER_STYLE$study_area_color,
                      linewidth = 0.8, linetype = "dashed", inherit.aes = FALSE)
   }
   p <- p + ggspatial::annotation_scale(location = "br", width_hint = 0.25)
@@ -192,7 +217,7 @@ add_spatial_layers <- function(p, land, WEA_wind, study_area,
 message("\n=== LOADING DATA ===")
 message("Reading: ", infile)
 
-required_cols <- c("lon", "lat", "date_utc", "scientific_name", "common_name")
+required_cols <- c("source", "lon", "lat", "date_utc", "scientific_name", "common_name")
 optional_cols <- c("is_duplicate", if (!is.null(weight_col)) weight_col else NULL)
 
 df <- readr::read_csv(
@@ -340,8 +365,7 @@ message("\n=== TAGGING RECORDS BY WEA CELL (>=", wea_overlap_threshold * 100, "%
 
 # Build temporary cell polygons for overlap calculation
 # (cell_all exists after Section 9; tagging is deferred to after aggregation)
-# NOTE: df is converted to dt after tagging below -- keep this section before
-#       the data.table conversion.
+# NOTE: keep this section before creating the downstream dt tibble alias.
 
 if (!is.null(WEA_wind)) {
   # Build cell polygons from df grid coordinates
@@ -390,13 +414,7 @@ if (!is.null(WEA_wind)) {
 narw_n <- sum(grepl("RIGHT|glacialis", df$name_blob, ignore.case = TRUE) & df$in_survey)
 message("  NARW records in WEA cells: ", narw_n)
 
-if (use_datatable) {
-  message("\n=== Converting to data.table ===")
-  dt <- data.table::as.data.table(df)
-  data.table::setkey(dt, cell_id)
-} else {
-  dt <- df
-}
+dt <- df
 
 
 # ---- 8. Map extent --------------------------------------------------------------
@@ -421,18 +439,11 @@ if (!is.null(land)) {
 
 message("\n=== AGGREGATING ALL CETACEAN RECORDS ===")
 
-if (use_datatable && data.table::is.data.table(dt)) {
-  cell_all <- dt[, .(
-    n_all   = sum(w, na.rm = TRUE),
-    n_years = data.table::uniqueN(year, na.rm = TRUE)
-  ), by = .(cell_id, gx, gy, xc, yc)] %>% as_tibble()
-} else {
-  cell_all <- dt %>%
-    group_by(cell_id, gx, gy, xc, yc) %>%
-    summarise(n_all   = sum(w, na.rm = TRUE),
-              n_years = n_distinct(year, na.rm = TRUE),
-              .groups = "drop")
-}
+cell_all <- dt %>%
+  group_by(cell_id, gx, gy, xc, yc) %>%
+  summarise(n_all   = sum(w, na.rm = TRUE),
+            n_years = n_distinct(year, na.rm = TRUE),
+            .groups = "drop")
 
 
 # ---- 10. Calculate confidence index ---------------------------------------------
@@ -512,8 +523,20 @@ p_all <- ggplot(cell_all) +
            label = paste0(year_min, "-", year_max, " | ", grid_km, " km grid",
                           if (log_transform_all) " | log scale" else ""),
            hjust = -0.1, vjust = 1.5, size = 3.5, color = "grey30") +
-  coord_sf(xlim = xlims, ylim = ylims, crs = 32620, expand = FALSE, clip = "on") +
-  theme_map()
+  scale_x_continuous(breaks = seq(-66, -56, by = 2)) +
+  scale_y_continuous(breaks = seq(40, 48, by = 2)) +
+  coord_sf(xlim = xlims, ylim = ylims, crs = 32620, datum = sf::st_crs(4326),
+           expand = FALSE, clip = "on") +
+  theme_map(show_axes = TRUE) +
+  theme(
+    legend.position = c(0.92, 0.1),
+    legend.justification = c(1, 0),
+    legend.background = element_rect(fill = "white", color = NA),
+    legend.key.height = unit(0.55, "cm"),
+    legend.key.width = unit(0.25, "cm"),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 9)
+  )
 
 p_all <- suppressMessages(add_spatial_layers(p_all, land, WEA_wind, study_area, survey_area))
 suppressMessages(ggsave(file.path(out_dir, "00_all_cetacean_records.png"),
@@ -578,35 +601,21 @@ message("  Saved: 00_data_consistency.png")
 #          Controls for uneven observer effort across the study area.
 #          Cells with < min_records_all total cetacean sightings are masked.
 
-create_target_maps <- function(nm, target_regex, dt_input, cell_all_conf, use_dt = FALSE) {
+create_target_maps <- function(nm, target_regex, dt_input, cell_all_conf) {
   
   message("\n=== Processing: ", nm, " ===")
   
-  if (use_dt && data.table::is.data.table(dt_input)) {
-    cell_sum <- dt_input[, .(
-      n_all    = sum(w, na.rm = TRUE),
-      n_target = sum(w * stringr::str_detect(name_blob, target_regex), na.rm = TRUE)
-    ), by = .(cell_id, gx, gy, x0, y0, xc, yc)] %>% as_tibble()
-    
-    target_years <- dt_input[
-      stringr::str_detect(name_blob, target_regex),
-      .(n_target_years = data.table::uniqueN(year, na.rm = TRUE)),
-      by = .(cell_id)
-    ] %>% as_tibble()
-    
-  } else {
-    cell_sum <- dt_input %>%
-      mutate(is_target = stringr::str_detect(name_blob, target_regex)) %>%
-      group_by(cell_id, gx, gy, xc, yc) %>%
-      summarise(n_all    = sum(w, na.rm = TRUE),
-                n_target = sum(w[is_target], na.rm = TRUE),
-                .groups  = "drop")
-    
-    target_years <- dt_input %>%
-      filter(stringr::str_detect(name_blob, target_regex)) %>%
-      group_by(cell_id) %>%
-      summarise(n_target_years = n_distinct(year, na.rm = TRUE), .groups = "drop")
-  }
+  cell_sum <- dt_input %>%
+    mutate(is_target = stringr::str_detect(name_blob, target_regex)) %>%
+    group_by(cell_id, gx, gy, xc, yc) %>%
+    summarise(n_all    = sum(w, na.rm = TRUE),
+              n_target = sum(w[is_target], na.rm = TRUE),
+              .groups  = "drop")
+  
+  target_years <- dt_input %>%
+    filter(stringr::str_detect(name_blob, target_regex)) %>%
+    group_by(cell_id) %>%
+    summarise(n_target_years = n_distinct(year, na.rm = TRUE), .groups = "drop")
   
   cell_sum <- cell_sum %>%
     left_join(target_years, by = "cell_id") %>%
@@ -705,9 +714,10 @@ message("\n=== CREATING TARGET MAPS ===")
 target_patterns <- lapply(targets, function(x) stringr::regex(x, ignore_case = TRUE))
 
 if (use_parallel && length(targets) >= 3) {
-  message("Using parallel processing (", future::availableCores() - 1, " workers)")
+  workers <- parallel_workers(length(targets))
+  message("Using parallel processing (", workers, " workers)")
   future::plan(future::multisession,
-               workers = min(length(targets), future::availableCores() - 1))
+               workers = workers)
 
   # Capture PROJ_LIB in the main session so workers can inherit it.
   # Multisession workers are fresh R processes and may not find proj.db otherwise.
@@ -723,14 +733,14 @@ if (use_parallel && length(targets) >= 3) {
       conflicted::conflicts_prefer(lubridate::month, .quiet = TRUE)
       conflicted::conflicts_prefer(dplyr::filter,    .quiet = TRUE)
       conflicted::conflicts_prefer(dplyr::select,    .quiet = TRUE)
-      create_target_maps(nm, target_patterns[[nm]], dt, cell_all, use_dt = use_datatable)
+      create_target_maps(nm, target_patterns[[nm]], dt, cell_all)
     },
     .options = furrr::furrr_options(seed = TRUE)
   )
   future::plan(future::sequential)
 } else {
   for (nm in names(targets)) {
-    create_target_maps(nm, target_patterns[[nm]], dt, cell_all, use_dt = use_datatable)
+    create_target_maps(nm, target_patterns[[nm]], dt, cell_all)
   }
 }
 
@@ -832,34 +842,20 @@ yr_min_data   <- min(df$year, na.rm = TRUE)
 yr_max_data   <- max(df$year, na.rm = TRUE)
 n_years_total <- yr_max_data - yr_min_data + 1
 
-if (use_datatable && data.table::is.data.table(dt)) {
-  sp <- dt[, .(
+sp <- df %>%
+  group_by(species = .data[[species_field]]) %>%
+  summarise(
     n_study_area        = sum(w, na.rm = TRUE),
-    n_survey_any        = sum(w[in_survey == TRUE], na.rm = TRUE),
-    n_spring_study      = sum(w[is_spring == TRUE], na.rm = TRUE),
-    n_spring_survey_any = sum(w[is_spring == TRUE & in_survey == TRUE], na.rm = TRUE),
-    years_study_area    = data.table::uniqueN(year, na.rm = TRUE),
-    years_survey_any    = data.table::uniqueN(year[in_survey == TRUE], na.rm = TRUE),
-    first_year_wea      = suppressWarnings(min(year[in_survey == TRUE], na.rm = TRUE)),
-    last_year_wea       = suppressWarnings(max(year[in_survey == TRUE], na.rm = TRUE)),
-    streak_wea          = longest_streak(year[in_survey == TRUE])
-  ), by = .(species = get(species_field))] %>% as_tibble()
-} else {
-  sp <- df %>%
-    group_by(species = .data[[species_field]]) %>%
-    summarise(
-      n_study_area        = sum(w, na.rm = TRUE),
-      n_survey_any        = sum(w[in_survey], na.rm = TRUE),
-      n_spring_study      = sum(w[is_spring], na.rm = TRUE),
-      n_spring_survey_any = sum(w[is_spring & in_survey], na.rm = TRUE),
-      years_study_area    = n_distinct(year),
-      years_survey_any    = n_distinct(year[in_survey]),
-      first_year_wea      = suppressWarnings(min(year[in_survey], na.rm = TRUE)),
-      last_year_wea       = suppressWarnings(max(year[in_survey], na.rm = TRUE)),
-      streak_wea          = longest_streak(year[in_survey]),
-      .groups             = "drop"
-    )
-}
+    n_survey_any        = sum(w[in_survey], na.rm = TRUE),
+    n_spring_study      = sum(w[is_spring], na.rm = TRUE),
+    n_spring_survey_any = sum(w[is_spring & in_survey], na.rm = TRUE),
+    years_study_area    = n_distinct(year),
+    years_survey_any    = n_distinct(year[in_survey]),
+    first_year_wea      = suppressWarnings(min(year[in_survey], na.rm = TRUE)),
+    last_year_wea       = suppressWarnings(max(year[in_survey], na.rm = TRUE)),
+    streak_wea          = longest_streak(year[in_survey]),
+    .groups             = "drop"
+  )
 
 sp <- sp %>%
   mutate(
@@ -886,6 +882,213 @@ sp_renamed <- sp %>%
     prop_years_wea     = prop_years_survey
   )
 
+wea_abbrev <- c(
+  "French Bank"       = "FB",
+  "Middle Bank"       = "MB",
+  "Sydney Bight"      = "SB",
+  "Sable Island Bank" = "SIB"
+)
+
+wea_display_order <- unname(wea_abbrev)
+excluded_established_species <- c("Unidentified Whale", "Dolphin/Porpoise (NS)")
+
+df_points <- df %>%
+  filter(
+    !grepl("SEAL", common_name, ignore.case = TRUE),
+    !is.na(lon),
+    !is.na(lat)
+  ) %>%
+  sf::st_as_sf(coords = c("lon", "lat"), crs = 4326, remove = FALSE) %>%
+  sf::st_transform(crs = 32620)
+
+wea_buffers <- WEA_wind %>%
+  sf::st_transform(crs = 32620) %>%
+  mutate(wea_abbrev = dplyr::recode(WEA, !!!wea_abbrev)) %>%
+  sf::st_buffer(dist = documented_buffer_km * 1000)
+
+wea_idx <- sf::st_intersects(df_points, wea_buffers)
+
+documented_long <- tibble::tibble(
+  point_id = rep(seq_along(wea_idx), lengths(wea_idx)),
+  wea_id   = unlist(wea_idx)
+) %>%
+  bind_cols(sf::st_drop_geometry(df_points)[.$point_id, , drop = FALSE]) %>%
+  mutate(
+    wea_name   = wea_buffers$WEA[wea_id],
+    Area_km2   = wea_buffers$Area_km2[wea_id],
+    wea_abbrev = factor(wea_buffers$wea_abbrev[wea_id], levels = wea_display_order)
+  )
+
+documented_wea <- documented_long %>%
+  group_by(species = .data[[species_field]], wea_abbrev) %>%
+  summarise(
+    records_wea = sum(w, na.rm = TRUE),
+    years_wea   = n_distinct(year),
+    .groups     = "drop"
+  ) %>%
+  filter(
+    records_wea >= documented_min_records,
+    years_wea >= documented_min_years
+  )
+
+documented_totals <- documented_long %>%
+  distinct(point_id, species = .data[[species_field]], date_utc, year, .keep_all = TRUE) %>%
+  group_by(species) %>%
+  summarise(
+    `Records (n)` = sum(w, na.rm = TRUE),
+    `Years (n)`   = n_distinct(year),
+    .groups       = "drop"
+  )
+
+wea_10km_union <- sf::st_union(wea_buffers)
+wea_10km_union_idx <- lengths(sf::st_intersects(df_points, wea_10km_union)) > 0
+
+wea_10km_species_summary <- sf::st_drop_geometry(df_points) %>%
+  mutate(
+    point_id = dplyr::row_number(),
+    in_wea_10km = wea_10km_union_idx
+  ) %>%
+  group_by(species = .data[[species_field]]) %>%
+  summarise(
+    n_study_area = sum(w, na.rm = TRUE),
+    n_wea_10km = sum(w[in_wea_10km], na.rm = TRUE),
+    pct_wea_10km = ifelse(n_study_area > 0, round(100 * n_wea_10km / n_study_area, 1), 0),
+    years_study_area = n_distinct(year),
+    years_wea_10km = n_distinct(year[in_wea_10km]),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(n_wea_10km), desc(n_study_area), species)
+
+wea_10km_area_summary <- tibble::tibble(
+  region = c("Study area", "WEA polygons", paste0("WEA ", documented_buffer_km, " km buffer")),
+  area_km2 = c(
+    study_area_km2,
+    WEA_wind_km2,
+    as.numeric(sf::st_area(wea_10km_union)) / 1e6
+  )
+) %>%
+  mutate(
+    pct_study_area = round(100 * area_km2 / study_area_km2, 1)
+  )
+
+readr::write_csv(wea_10km_species_summary, wea_10km_species_csv)
+message("  Saved: ", wea_10km_species_csv)
+
+readr::write_csv(wea_10km_area_summary, wea_10km_area_csv)
+message("  Saved: ", wea_10km_area_csv)
+
+appendix_a_table1 <- documented_wea %>%
+  filter(!species %in% excluded_established_species) %>%
+  arrange(species, wea_abbrev) %>%
+  group_by(species) %>%
+  summarise(
+    `WEAs where species was established` =
+      paste(as.character(wea_abbrev), collapse = ", "),
+    .groups = "drop"
+  ) %>%
+  inner_join(documented_totals, by = "species") %>%
+  transmute(
+    Species = species,
+    `Records (n)`,
+    `Years (n)`,
+    `WEAs where species was established`
+  ) %>%
+  arrange(Species)
+
+readr::write_csv(appendix_a_table1, appendix_wea_csv)
+message("  Saved: ", appendix_wea_csv)
+
+table2_records <- documented_long %>%
+  mutate(
+    WEA = wea_name,
+    data_source = .data[["source"]]
+  )
+
+table2_species <- table2_records %>%
+  group_by(WEA, species = .data[[species_field]]) %>%
+  summarise(
+    records_wea = sum(w, na.rm = TRUE),
+    years_wea   = n_distinct(year),
+    .groups     = "drop"
+  ) %>%
+  mutate(
+    documentation = ifelse(
+      records_wea >= documented_min_records & years_wea >= documented_min_years,
+      "established",
+      "limited"
+    )
+  )
+
+collapse_species <- function(x) {
+  x <- sort(unique(x[!is.na(x) & x != ""]))
+  if (length(x) == 0) return(NA_character_)
+  paste(x, collapse = "; ")
+}
+
+table2_lists <- table2_species %>%
+  filter(!species %in% excluded_established_species) %>%
+  group_by(WEA, documentation) %>%
+  summarise(
+    species_n = n_distinct(species),
+    species_list = collapse_species(species),
+    .groups = "drop"
+  ) %>%
+  tidyr::pivot_wider(
+    names_from = documentation,
+    values_from = c(species_n, species_list),
+    values_fill = list(species_n = 0, species_list = NA_character_)
+  )
+
+appendix_a_table2_stats <- table2_records %>%
+  group_by(WEA, Area_km2) %>%
+  summarise(
+    total_records  = sum(w, na.rm = TRUE),
+    wsdb_records   = sum(w[data_source == "wsdb"], na.rm = TRUE),
+    aerial_records = sum(w[data_source == "aerial"], na.rm = TRUE),
+    years_count    = n_distinct(year),
+    first_year     = min(year, na.rm = TRUE),
+    last_year      = max(year, na.rm = TRUE),
+    winter_records = sum(w[season == "Winter"], na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  left_join(table2_lists, by = "WEA") %>%
+  mutate(
+    species_n_established = coalesce(species_n_established, 0L),
+    species_n_limited = coalesce(species_n_limited, 0L)
+  ) %>%
+  arrange(factor(WEA, levels = names(wea_abbrev)))
+
+appendix_a_table2 <- appendix_a_table2_stats %>%
+  transmute(
+    WEA,
+    `Area (km2)` = Area_km2,
+    `Visual coverage` = paste0(
+      total_records, " records: ",
+      wsdb_records, " WSDB, ",
+      aerial_records, " aerial; ",
+      first_year, "-", last_year, "; ",
+      ifelse(winter_records > 0, "yes winter sightings", "no winter sightings"),
+      "; established species (n) = ", species_n_established
+    ),
+    `Established species list` = species_list_established,
+    `Limited species list` = species_list_limited
+  )
+
+readr::write_csv(appendix_a_table2, appendix_comp_csv)
+message("  Saved: ", appendix_comp_csv)
+
+readr::write_csv(appendix_a_table2_stats, appendix_comp_stats_csv)
+message("  Saved: ", appendix_comp_stats_csv)
+
+appendix_a_species_status <- table2_species %>%
+  mutate(
+    include_in_species_lists = !species %in% excluded_established_species
+  ) %>%
+  arrange(factor(WEA, levels = names(wea_abbrev)), documentation, species)
+
+readr::write_csv(appendix_a_species_status, appendix_species_status_csv)
+message("  Saved: ", appendix_species_status_csv)
+
 metadata <- tibble::tribble(
   ~Column,            ~Description,                                                     ~Data_Type, ~Notes,
   "species",          "Species common name",                                            "text",     "Based on species_field config",
@@ -902,6 +1105,44 @@ metadata <- tibble::tribble(
   "pct_in_wea",       "Percentage of total sightings in WEA",                          "decimal",  "(n_wea / n_study_area) x 100",
   "consistency_wea",  "Temporal consistency category for WEA sightings",               "text",     "frequent / intermittent / rare / none",
   "present_in_wea",   "Presence flag for WEA",                                         "logical",  "TRUE if years_wea_count > 0"
+)
+
+table1_metadata <- tibble::tribble(
+  ~Column,                                   ~Description,                                             ~Data_Type, ~Notes,
+  "Species",                                 "Species common name",                                    "text",     "Alphabetical; seals excluded",
+  "Records (n)",                             "Sightings records within 10 km of any WEA boundary",      "integer",  "Deduplicated combined sightings",
+  "Years (n)",                               "Distinct sighting years within 10 km of any WEA boundary", "integer",  "Deduplicated combined sightings",
+  "WEAs where species was established",      "WEA abbreviations meeting documentation criteria",         "text",     "Established = minimum 2 records and 2 years per species per WEA"
+)
+
+table2_metadata <- tibble::tribble(
+  ~Column,                         ~Description,                                             ~Data_Type, ~Notes,
+  "WEA",                           "Wind Energy Area name",                                  "text",     "From Designated_WEAs shapefile",
+  "Area (km2)",                    "WEA polygon area",                                       "numeric",  "From Designated_WEAs shapefile",
+  "Visual coverage",               "Record count by source, year range, winter presence, and established species count", "text", "All cetacean records within 10 km of WEA polygon boundaries",
+  "Established species list",       "Species meeting documentation criteria",                   "text",     "Established = minimum 2 records and 2 years; seals and non-specific NS/unidentified groups excluded",
+  "Limited species list",           "Detected species below documentation threshold",            "text",     "Detected within 10 km buffered WEA polygons but below established threshold; seals and non-specific NS/unidentified groups excluded"
+)
+
+table_captions <- tibble::tribble(
+  ~Table, ~Caption,
+  "Table 1",
+  paste(
+    "Established cetacean species documented near Wind Energy Areas (WEAs).",
+    "Established species are defined as species with at least 2 sighting records in at least 2 years within 10 km of a WEA boundary.",
+    "Records are deduplicated combined sightings from WSDB and aerial survey datasets.",
+    "WEA abbreviations: FB = French Bank, MB = Middle Bank, SB = Sydney Bight, SIB = Sable Island Bank.",
+    "Non-specific categories, Unidentified Whale and Dolphin/Porpoise (NS), are omitted from established species lists because they occurred as established groups in every WEA."
+  ),
+  "Table 2",
+  paste(
+    "Comparability summary of cetacean data by WEA.",
+    "Visual coverage summarizes all cetacean sighting records within 10 km of each WEA boundary, including the number of WSDB and aerial survey records, the year range of records, whether winter sightings were present, and the count of established species.",
+    "Established species had at least 2 sighting records in at least 2 years within 10 km of the WEA boundary.",
+    "Limited species were detected within 10 km of the WEA boundary but did not meet the established threshold.",
+    "WEA = Wind Energy Area; WSDB = Whale Sightings Database.",
+    "Non-specific categories, Unidentified Whale and Dolphin/Porpoise (NS), are omitted from established species lists and established/limited species counts because they occurred as established groups in every WEA."
+  )
 )
 
 analysis_info <- tibble::tribble(
@@ -921,7 +1162,12 @@ analysis_info <- tibble::tribble(
 
 writexl::write_xlsx(
   list("Species_Data"    = sp_renamed,
+       "Table_1_Established" = appendix_a_table1,
+       "Table_2_WEA_Comparability" = appendix_a_table2,
+       "Table_Captions" = table_captions,
        "Column_Metadata" = metadata,
+       "Table1_Metadata" = table1_metadata,
+       "Table2_Metadata" = table2_metadata,
        "Analysis_Info"   = analysis_info),
   path = appendix_xlsx
 )
@@ -935,24 +1181,17 @@ if (make_species_maps) {
   
   message("\n=== CREATING INDIVIDUAL SPECIES MAPS ===")
   
-  create_species_map <- function(sp_name, dt_input, use_dt = FALSE) {
+  create_species_map <- function(sp_name, dt_input) {
     sp_label <- as.character(sp_name)
     sp_file  <- nm_safe(sp_label)
     
-    if (use_dt && data.table::is.data.table(dt_input)) {
-      cell_sp <- dt_input[get(species_field) == sp_label, .(
-        n_sp = sum(w, na.rm = TRUE)
-      ), by = .(cell_id, gx, gy, xc, yc)] %>% as_tibble()
-      pts_sp  <- as.data.frame(dt_input[get(species_field) == sp_label, .(x_m, y_m)])
-    } else {
-      cell_sp <- dt_input %>%
-        filter(.data[[species_field]] == sp_label) %>%
-        group_by(cell_id, gx, gy, xc, yc) %>%
-        summarise(n_sp = sum(w, na.rm = TRUE), .groups = "drop")
-      pts_sp  <- dt_input %>%
-        filter(.data[[species_field]] == sp_label) %>%
-        select(x_m, y_m)
-    }
+    cell_sp <- dt_input %>%
+      filter(.data[[species_field]] == sp_label) %>%
+      group_by(cell_id, gx, gy, xc, yc) %>%
+      summarise(n_sp = sum(w, na.rm = TRUE), .groups = "drop")
+    pts_sp  <- dt_input %>%
+      filter(.data[[species_field]] == sp_label) %>%
+      select(x_m, y_m)
     
     pts_sp <- pts_sp %>% filter(!is.na(x_m), !is.na(y_m))
     if (nrow(cell_sp) == 0) return(invisible(NULL))
@@ -1020,8 +1259,10 @@ if (make_species_maps) {
   message("  Creating maps for ", length(sp_to_map), " species")
   
   if (use_parallel && length(sp_to_map) >= 8) {
+    workers <- parallel_workers(length(sp_to_map))
+    message("  Using parallel processing (", workers, " workers)")
     future::plan(future::multisession,
-                 workers = min(length(sp_to_map), future::availableCores() - 1))
+                 workers = workers)
     furrr::future_walk(
       sp_to_map,
       function(spp) {
@@ -1029,13 +1270,13 @@ if (make_species_maps) {
         conflicted::conflicts_prefer(lubridate::month, .quiet = TRUE)
         conflicted::conflicts_prefer(dplyr::filter,    .quiet = TRUE)
         conflicted::conflicts_prefer(dplyr::select,    .quiet = TRUE)
-        create_species_map(spp, dt, use_dt = use_datatable)
+        create_species_map(spp, dt)
       },
       .options = furrr::furrr_options(seed = TRUE)
     )
     future::plan(future::sequential)
   } else {
-    for (spp in sp_to_map) create_species_map(spp, dt, use_dt = use_datatable)
+    for (spp in sp_to_map) create_species_map(spp, dt)
   }
   
   message("  Species maps saved to: ", species_map_dir)

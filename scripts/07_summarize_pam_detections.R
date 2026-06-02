@@ -31,6 +31,8 @@ suppressWarnings(source(here::here("scripts/00_load_helpers.R")))
 filepath = "input/raw_data/PAM/baleen_presence_laura_2025.csv"
 dir.create("output/figs/Effort_maps/PAM", showWarnings = FALSE, recursive = TRUE)
 dir.create("output/data", showWarnings = FALSE, recursive = TRUE)
+pam_wea_distance_csv <- "output/data/pam_wea_distance_summary.csv"
+dir.create("output/data", showWarnings = FALSE, recursive = TRUE)
 
 # PROJECTIONS ------------------------------------------------------
 UTM20 <- SPATIAL_CRS_UTM20 # UTM Zone 20N
@@ -40,59 +42,8 @@ UTM20 <- SPATIAL_CRS_UTM20 # UTM Zone 20N
 # of the study area boundary are included (was: exact intersection only)
 PAM_BUFFER_DIST_M <- 10000  # 10 km — must match KDE script
 
-# WHALE SPECIES PALETTE --------------------------------------------
-# Inspired by Wes Anderson "Life Aquatic" + "Grand Budapest Hotel" —
-# desaturated, dusty, film-stock feel. No light yellows.
-#
-# Design logic:
-#   Baleen whales  → blue/teal/slate family + terracotta accent for Humpback
-#                    burgundy for Right Whale (rare/endangered visual weight)
-#   Beaked whales  → warm sandy-earth family, clearly distinct from baleen group
-#
-# Copy SPECIES_COMMON_NAMES + WHALE_PALETTE into any script for consistent colours.
-# Use with:  scale_fill_manual(values = WHALE_PALETTE)  (fill = common_name)
-#            scale_colour_manual(values = WHALE_PALETTE) (colour = common_name)
-
-# Latin code → common name lookup (baleen + beaked species)
-SPECIES_COMMON_NAMES <- c(
-  "Bb"   = "Sei Whale",
-  "Bm"   = "Blue Whale",
-  "Bp"   = "Fin Whale",
-  "Mn"   = "Humpback Whale",
-  "Ba"   = "Minke Whale",
-  "Eg"   = "North Atlantic Right Whale",
-  "Ha"   = "Northern Bottlenose Whale",
-  "Mb"   = "Sowerby's Beaked Whale",
-  "Zc"   = "Cuvier's Beaked Whale",
-  "MmMe" = "True's/Gervais' Beaked Whale"
-)
-
-# Palette keyed by common name — keep in sync with 03_plot_combined_sightings.R
-WHALE_PALETTE <- c(
-  # ── Baleen: blue-teal family ──────────────────────────────────────────────
-  "Blue Whale"                   = "#3288BD",
-  "Fin Whale"                    = "#276B95",
-  "Sei Whale"                    = "#2A5857",
-  "Fin/Sei Whale"                = "#7AB0C0",
-  "Humpback Whale"               = "#6DAFB1",
-  "Minke Whale"                  = "#9bc4f8",
-  "North Atlantic Right Whale"   = "#7C6FB3",
-  # ── Beaked: warm sandy-earth family ──────────────────────────────────────
-  "Northern Bottlenose Whale"    = "#B07D62",
-  "Sowerby's Beaked Whale"       = "#8B6B4E",
-  "Cuvier's Beaked Whale"        = "#C9A97A",
-  "True's/Gervais' Beaked Whale" = "#7A6651",
-  # ── Dolphins & other odontocetes ─────────────────────────────────────────
-  "Common Dolphin"               = "#F1B2A1",
-  "Atlantic Bottlenose Dolphin"  = "#D53E4F",
-  "Atlantic White-Sided Dolphin" = "#E57A7D",
-  "White-Beaked Dolphin"         = "#ABDDA4",
-  "Striped Dolphin"              = "#66C2A5",
-  "Risso's Dolphin"              = "#A8627A",
-  "Long-Finned Pilot Whale"      = "#f7c6d5",
-  "Sperm Whale"                  = "#6B9527",
-  "Harbour Porpoise"             = "#FDAE61"
-)
+# Shared SPECIES_COMMON_NAMES, WHALE_PALETTE, SEASON_LEVELS, and SEASON_PALETTE
+# are sourced from scripts/helpers/helper_palettes.R via scripts/00_load_helpers.R.
 
 # Read baleen whale PAM season data------
 baleen_DOY <- read.csv(filepath)
@@ -225,16 +176,11 @@ p1 <- ggplot(
   sites_year_season,
   aes(
     x = factor(year), y = n_sites,
-    fill = factor(Season, levels = c("Winter", "Spring", "Summer", "Fall"))
+    fill = factor(Season, levels = SEASON_LEVELS)
   )
 ) +
   geom_col(position = "stack", alpha = 0.8) +
-  scale_fill_manual(
-    values = c(
-      "Winter" = "#2E86AB", "Spring" = "#06A77D",
-      "Summer" = "#F18F01", "Fall" = "#A23B72"
-    )
-  ) +
+  scale_fill_manual(values = SEASON_PALETTE) +
   labs(
     title = "",
     x = "",
@@ -258,7 +204,7 @@ range_data <- seasonal_summary %>%
   mutate(degrees = ifelse(degrees == "lat_range", "Latitude", "Longitude"))
 
 p2 <- ggplot(range_data, aes(
-  x = factor(Season, levels = c("Winter", "Spring", "Summer", "Fall")),
+  x = factor(Season, levels = SEASON_LEVELS),
   y = range, fill = degrees
 )) +
   geom_col(position = "dodge", alpha = 0.8) +
@@ -327,7 +273,7 @@ species_detection_prop <- baleen_PA_season_named %>%
 p3 <- ggplot(
   species_detection_prop,
   aes(
-    x    = factor(Season, levels = c("Winter", "Spring", "Summer", "Fall")),
+    x    = factor(Season, levels = SEASON_LEVELS),
     y    = prop_sites_detected,
     fill = common_name
   )
@@ -349,7 +295,7 @@ p3 <- ggplot(
 p4 <- ggplot(
   species_season_summary,
   aes(
-    x    = factor(Season, levels = c("Winter", "Spring", "Summer", "Fall")),
+    x    = factor(Season, levels = SEASON_LEVELS),
     y    = detection_days,
     fill = common_name
   )
@@ -453,7 +399,8 @@ p_map <- ggplot() +
   # Add land first
   {
     if (exists("land") && !is.null(land)) {
-      geom_sf(data = land, fill = "grey60", color = NA)
+      geom_sf(data = land, fill = MAP_LAYER_STYLE$land_fill,
+              color = MAP_LAYER_STYLE$land_color)
     }
   } +
   # Add points
@@ -466,7 +413,7 @@ p_map <- ggplot() +
   {
     if (exists("osw_wind") && !is.null(osw_wind)) {
       geom_sf(
-        data = osw_wind, fill = NA, color = "#FF6B35",
+        data = osw_wind, fill = NA, color = MAP_LAYER_STYLE$wea_color,
         linewidth = 1, inherit.aes = FALSE
       )
     }
@@ -475,18 +422,13 @@ p_map <- ggplot() +
   {
     if (exists("study_area") && !is.null(study_area)) {
       geom_sf(
-        data = study_area, fill = NA, color = "black",
+        data = study_area, fill = NA, color = MAP_LAYER_STYLE$study_area_color,
         linewidth = 0.8, linetype = "dashed", inherit.aes = FALSE
       )
     }
   } +
   scale_alpha_continuous(range = c(0.3, 1), name = "Years Sampled") +
-  scale_color_manual(
-    values = c(
-      "Winter" = "#2E86AB", "Spring" = "#06A77D",
-      "Summer" = "#F18F01", "Fall" = "#A23B72"
-    )
-  ) +
+  scale_color_manual(values = SEASON_PALETTE) +
   coord_sf(xlim = xlims, ylim = ylims, crs = st_crs(UTM20), expand = FALSE) +
   facet_wrap(~Season) +
   labs(
@@ -563,6 +505,20 @@ cat(sprintf("stations_sf clipped: %d total → %d within %g km buffer\n",
             total_stations, nrow(stations_sf), PAM_BUFFER_DIST_M / 1000))
 
 study_area_stations <- nrow(stations_sf)
+
+if (exists("osw_wind") && !is.null(osw_wind) && nrow(stations_sf) > 0) {
+  pam_wea_dist_m <- units::drop_units(sf::st_distance(osw_wind, stations_sf))
+
+  pam_wea_distance_summary <- tibble::tibble(
+    WEA = osw_wind$WEA,
+    nearest_station_km = round(apply(pam_wea_dist_m, 1, min) / 1000, 1),
+    stations_within_10km = rowSums(pam_wea_dist_m <= PAM_BUFFER_DIST_M)
+  ) %>%
+    dplyr::arrange(WEA)
+
+  readr::write_csv(pam_wea_distance_summary, pam_wea_distance_csv)
+  cat("Saved PAM-WEA distance summary:", pam_wea_distance_csv, "\n")
+}
 
 # SUMMARY STATISTICS FOR STUDY AREA STATIONS ----
 cat("\n=== PAM STATION SUMMARY ===\n")
@@ -678,7 +634,8 @@ p_pam_range <- ggplot() +
   # Land first
   {
     if (exists("land_cropped") && !is.null(land_cropped)) {
-      geom_sf(data = land_cropped, fill = "grey75", color = "grey50", 
+      geom_sf(data = land_cropped, fill = MAP_LAYER_STYLE$land_fill,
+              color = MAP_LAYER_STYLE$land_color, 
               linewidth = 0.3, inherit.aes = FALSE)
     }
   } +
@@ -695,19 +652,19 @@ p_pam_range <- ggplot() +
   # OWA outline
   {
     if (exists("osw_wind") && !is.null(osw_wind)) {
-      geom_sf(data = osw_wind, fill = NA, color = "#FF6B35", 
+      geom_sf(data = osw_wind, fill = NA, color = MAP_LAYER_STYLE$wea_color, 
               linewidth = 1, inherit.aes = FALSE)
     }
   } +
 # contours  
     { if (exists("cont") && !is.null(cont)) {
-      geom_sf(data = cont, fill = NA, color = "grey", 
+      geom_sf(data = cont, fill = NA, color = MAP_LAYER_STYLE$bathy_color, 
               linewidth = 0.2, inherit.aes = FALSE)
     }}+
   # Study area outline
   {
     if (exists("study_area") && !is.null(study_area)) {
-      geom_sf(data = study_area, fill = NA, color = "black", 
+      geom_sf(data = study_area, fill = NA, color = MAP_LAYER_STYLE$study_area_color, 
               linewidth = 0.7, linetype = "dashed", inherit.aes = FALSE)
     }
   } +
@@ -723,19 +680,18 @@ p_pam_range <- ggplot() +
     label.position = "bottom",
     title.position = "top"
   )) +
-  coord_sf(xlim = map_xlims, ylim = map_ylims, crs = st_crs(UTM20), expand = T) +
+  scale_x_continuous(breaks = seq(-66, -56, by = 2)) +
+  scale_y_continuous(breaks = seq(40, 48, by = 2)) +
+  coord_sf(xlim = map_xlims, ylim = map_ylims, crs = st_crs(UTM20),
+           datum = st_crs(4326), expand = TRUE) +
   ggspatial::annotation_scale(location = "br", width_hint = 0.25) +
-  labs(
-    title    = "PAM Station Coverage",
-    subtitle = paste0("n = ", nrow(stations_sf), " stations within ",
-                      PAM_BUFFER_DIST_M / 1000, " km of study area")
-  ) +
+  labs(title = "PAM Station Coverage") +
   theme_bw(base_size = 14) +
   theme(
     panel.grid = element_blank(),
     axis.title = element_blank(),
-    # axis.text = element_blank(),
-    # axis.ticks = element_blank(),
+    axis.text = element_text(size = 10, color = "grey20"),
+    axis.ticks = element_line(color = "grey30", linewidth = 0.3),
     legend.position = c(0.98, 0.058),
     legend.key.spacing.x = unit(.02, "cm"),
     legend.key.justification = "center",
@@ -745,7 +701,7 @@ p_pam_range <- ggplot() +
     legend.key.size = unit(0.58, "cm"),
     legend.text = element_text(size = 10),
     legend.title = element_text(size = 10, face = "bold"),
-    plot.subtitle = element_text(size = 12, color = "grey30", margin = margin(b = 10))
+    plot.title = element_text(size = 14, face = "bold")
   )
 
 ggsave(
@@ -787,7 +743,7 @@ species_season_det <- whale_data %>%
     .groups         = "drop"
   ) %>%
   # Enforce season order for display
-  mutate(Season = factor(Season, levels = c("Winter", "Spring", "Summer", "Fall"))) %>%
+  mutate(Season = factor(Season, levels = SEASON_LEVELS)) %>%
   arrange(species, Season)
 
 cat("\n=== SPECIES x SEASON DETECTION DAYS (buffered study area stations) ===\n")

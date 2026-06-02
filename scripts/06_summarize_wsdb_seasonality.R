@@ -40,7 +40,7 @@ add_season <- function(data, date_col = date_utc) {
         month %in% c(9, 10, 11) ~ "Fall",
         TRUE ~ NA_character_
       ),
-      season = factor(season, levels = c("Spring", "Summer", "Fall", "Winter"))
+      season = factor(season, levels = SEASON_LEVELS)
     )
 }
 
@@ -172,7 +172,8 @@ p_seasonal <- ggplot(cell_seasonal) +
 # Add spatial overlays to each facet
 if (!is.null(land)) {
   p_seasonal <- p_seasonal + 
-    geom_sf(data = land, fill = "grey60", color = NA, inherit.aes = FALSE)
+    geom_sf(data = land, fill = MAP_LAYER_STYLE$land_fill,
+            color = MAP_LAYER_STYLE$land_color, inherit.aes = FALSE)
 }
 
 if (!is.null(WEA_wind)) {
@@ -183,7 +184,7 @@ if (!is.null(WEA_wind)) {
 
 if (!is.null(study_area)) {
   p_seasonal <- p_seasonal + 
-    geom_sf(data = study_area, fill = NA, color = "black", 
+    geom_sf(data = study_area, fill = NA, color = MAP_LAYER_STYLE$study_area_color, 
             linewidth = 0.6, linetype = "dashed", inherit.aes = FALSE)
 }
 
@@ -280,12 +281,7 @@ p_seasonal_bars <- ggplot(seasonal_cells, aes(x = season, y = total_records, fil
     vjust = -0.5,
     size = 3.5
   ) +
-  scale_fill_manual(values = c(
-    "Spring" = "#78c679",
-    "Summer" = "#fd8d3c", 
-    "Fall" = "#d95f0e",
-    "Winter" = "#6baed6"
-  )) +
+  scale_fill_manual(values = SEASON_PALETTE) +
   labs(
     title = "Seasonal Distribution of Cetacean Sightings",
     subtitle = paste0(year_min, "–", year_max),
@@ -345,12 +341,7 @@ p_seasonal_rate <- ggplot(seasonal_cells, aes(x = season, y = records_per_km2, f
     size = 3.5
   ) +
   
-  scale_fill_manual(values = c(
-    "Spring" = "#78c679",
-    "Summer" = "#fd8d3c", 
-    "Fall" = "#d95f0e",
-    "Winter" = "#6baed6"
-  )) +
+  scale_fill_manual(values = SEASON_PALETTE) +
   labs(
     title = "Concentration of Cetacean Sighting Records",
     subtitle = paste0(year_min, "–", year_max),
@@ -414,12 +405,7 @@ p_seasonal_coverage <- ggplot(
     size = 3.5
   ) +
   
-  scale_fill_manual(values = c(
-    "Spring" = "#78c679",
-    "Summer" = "#fd8d3c", 
-    "Fall" = "#d95f0e",
-    "Winter" = "#6baed6"
-  )) +
+  scale_fill_manual(values = SEASON_PALETTE) +
   labs(
     title = "Seasonal Coverage of Cetacean Sighting Records",
     subtitle = paste0(year_min, "–", year_max, "|", " Study area = ",

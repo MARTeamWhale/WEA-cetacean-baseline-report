@@ -96,9 +96,9 @@ RUN_COMPARE_PAM_SIGHTINGS <- T  # 11_compare_kde_pam_vs_sightings.R  (was 10, re
 # RUN_KDE_CONTOURS <- TRUE; RUN_COMPARE_PAM_SIGHTINGS <- TRUE
 
 # -- PRESET: Tweak map layouts only (KDEs already done) -----------------------
-# RUN_PLOT_SIGHTINGS <- TRUE
-# RUN_KDE_MAPS_ONLY  <- TRUE
-# RUN_COMPARE_PAM_SIGHTINGS <- TRUE
+RUN_PLOT_SIGHTINGS <- TRUE
+RUN_KDE_MAPS_ONLY  <- TRUE
+RUN_COMPARE_PAM_SIGHTINGS <- TRUE
 
 # -- PRESET: New data delivery (re-run from aerial clean through KDEs) ---------
 # RUN_CLEAN_AERIAL <- TRUE; RUN_COMBINE_SIGHTINGS <- TRUE
@@ -119,6 +119,32 @@ RUN_COMPARE_PAM_SIGHTINGS <- T  # 11_compare_kde_pam_vs_sightings.R  (was 10, re
 # ==============================================================================
 
 library(here)
+
+prefer_tidyverse_conflicts <- function() {
+  if (!requireNamespace("conflicted", quietly = TRUE)) {
+    return(invisible(NULL))
+  }
+  
+  conflicted::conflicts_prefer(
+    dplyr::arrange,
+    dplyr::between,
+    dplyr::filter,
+    dplyr::first,
+    dplyr::lag,
+    dplyr::last,
+    dplyr::mutate,
+    dplyr::rename,
+    dplyr::select,
+    dplyr::summarise,
+    lubridate::month,
+    lubridate::year,
+    purrr::map,
+    purrr::walk,
+    .quiet = TRUE
+  )
+}
+
+prefer_tidyverse_conflicts()
 
 cat("\n")
 cat("==============================================================================\n")

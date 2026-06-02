@@ -690,11 +690,11 @@ create_comparison_map <- function(species_key, species_info,
       
       p_sightings <- ggplot() +
         map_layer_bathy_contours(cont) +
+        map_layer_wea(osw_wind, alpha = 0.18, linewidth = 0.8) +
         geom_sf(data = sightings_kde, aes(fill = Quantile), color = NA, alpha = 0.6) +
-        geom_sf(data = species_sightings, color = "grey40", fill = NULL,
+        geom_sf(data = species_sightings, color = "grey40", fill = "grey40", alpha = .5,
                 size = 1, shape = 21) +
         map_layer_land(land) +
-        map_layer_wea(osw_wind) +
         map_layer_study_area(study_area) +
         scale_fill_manual(values = pal, name = "KDE Quantile",
                           drop = FALSE, guide = "none") +
@@ -730,11 +730,12 @@ create_comparison_map <- function(species_key, species_info,
       
       p_pam <- ggplot() +
         map_layer_bathy_contours(cont) +
+        map_layer_wea(osw_wind, alpha = 0.18, linewidth = 0.8) +
         geom_sf(data = pam_kde, aes(fill = Quantile), color = NA, alpha = 0.6) +
         {if (nrow(pam_detections) > 0)
           geom_sf(data = pam_detections,
-                  aes(size = proportion_det, color = proportion_det), alpha = 0.8)} +
-        map_layer_wea(osw_wind)
+                  aes(size = proportion_det, color = proportion_det), alpha = 0.8)}
+      
       
       if (!is_grouped && nrow(pam_zero) > 0) {
         dummy_zero <- data.frame(x = NA, y = NA, label = "No Validated Detections")

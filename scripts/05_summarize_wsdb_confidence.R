@@ -11,14 +11,14 @@
 # IMPORTANT: Run 04_summarize_wsdb_effort.R first. This script depends on the following
 #            objects remaining in the R environment:
 #              cell_all        - gridded confidence data frame
-#              dt              - sightings data (data.table or tibble)
+#              dt              - sightings data tibble
 #              targets         - named list of regex patterns
 #              target_patterns - compiled regex objects
 #              target_titles   - human-readable species group names
 #              WEA_wind        - sf object for WEA polygons
 #              out_dir         - output directory path
 #              cell_m          - grid cell size in metres
-#              use_datatable   - logical flag for data.table aggregation
+#              use_datatable   - retained for compatibility; expected to be FALSE
 #
 # Changes:
 
@@ -171,41 +171,21 @@ calculate_target_metrics <- function(cells_data, target_name, target_regex,
     pull(cell_id)
   
   # ---- 6a. Aggregate sightings per cell ----------------------------------------
-  if (use_datatable && "data.table" %in% class(dt_data)) {
-    
-    target_summary <- dt_data[cell_id %in% region_cell_ids][, .(
+  target_summary <- dt_data %>%
+    filter(cell_id %in% region_cell_ids) %>%
+    mutate(is_target = stringr::str_detect(name_blob, target_regex)) %>%
+    group_by(cell_id) %>%
+    summarise(
       n_all    = sum(w, na.rm = TRUE),
-      n_target = sum(w * stringr::str_detect(name_blob, target_regex), na.rm = TRUE)
-    ), by = .(cell_id)]
-    
-    target_years <- dt_data[
-      cell_id %in% region_cell_ids &
-        stringr::str_detect(name_blob, target_regex),
-      .(n_target_years = data.table::uniqueN(year, na.rm = TRUE)),
-      by = .(cell_id)
-    ]
-    
-    target_summary <- as_tibble(target_summary)
-    target_years   <- as_tibble(target_years)
-    
-  } else {
-    
-    target_summary <- dt_data %>%
-      filter(cell_id %in% region_cell_ids) %>%
-      mutate(is_target = stringr::str_detect(name_blob, target_regex)) %>%
-      group_by(cell_id) %>%
-      summarise(
-        n_all    = sum(w, na.rm = TRUE),
-        n_target = sum(w[is_target], na.rm = TRUE),
-        .groups  = "drop"
-      )
-    
-    target_years <- dt_data %>%
-      filter(cell_id %in% region_cell_ids,
-             stringr::str_detect(name_blob, target_regex)) %>%
-      group_by(cell_id) %>%
-      summarise(n_target_years = n_distinct(year, na.rm = TRUE), .groups = "drop")
-  }
+      n_target = sum(w[is_target], na.rm = TRUE),
+      .groups  = "drop"
+    )
+  
+  target_years <- dt_data %>%
+    filter(cell_id %in% region_cell_ids,
+           stringr::str_detect(name_blob, target_regex)) %>%
+    group_by(cell_id) %>%
+    summarise(n_target_years = n_distinct(year, na.rm = TRUE), .groups = "drop")
   
   # ---- 6b/6c. Join years, classify evidence, combine with cell confidence ------
   # All steps in one pipeline to avoid column collision from the redundant

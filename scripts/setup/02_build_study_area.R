@@ -178,12 +178,13 @@ ess_nafo_RA <- st_intersection(nafo_ess_union, OSW_studyarea)
     {if (!is.null(cont_map))
        geom_sf(
          data = dplyr::filter(cont_map, level %in% c(-200, -400, -1000, -2500, -3200)),
-         col = "grey50", linewidth = 0.2
+         col = MAP_LAYER_STYLE$bathy_color, linewidth = 0.2
        )
     } +
 
     # land
-    geom_sf(data = land_map, color = NA, fill = "grey50") +
+    geom_sf(data = land_map, color = MAP_LAYER_STYLE$land_color,
+            fill = MAP_LAYER_STYLE$land_fill) +
     
     # OSW study area
     geom_sf(
@@ -214,7 +215,7 @@ ess_nafo_RA <- st_intersection(nafo_ess_union, OSW_studyarea)
        values = c(
           "Offshore wind regional assessment area" = "grey90",
           "Eastern Scotian Shelf study area"              = "lightblue",
-          "Wind Energy AOIs"        = "pink"
+          "Wind Energy AOIs"        = MAP_LAYER_STYLE$wea_color
        )
     ) +
     scale_color_manual(
@@ -222,7 +223,7 @@ ess_nafo_RA <- st_intersection(nafo_ess_union, OSW_studyarea)
        values = c(
           "Offshore wind regional assessment area" = "black",
           "Eastern Scotian Shelf study area"              = "blue",
-          "Wind Energy AOIs"        = "red"
+          "Wind Energy AOIs"        = MAP_LAYER_STYLE$wea_color
        )
     ) +
     

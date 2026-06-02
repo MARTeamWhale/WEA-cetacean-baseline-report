@@ -109,22 +109,22 @@ map_coord <- function(xlim,
 }
 
 map_layer_land <- function(land,
-                           fill = "grey65",
-                           color = NA,
+                           fill = MAP_LAYER_STYLE$land_fill,
+                           color = MAP_LAYER_STYLE$land_color,
                            linewidth = 0.2) {
   ggplot2::geom_sf(data = land, fill = fill, color = color, linewidth = linewidth)
 }
 
 map_layer_wea <- function(wea,
-                          color = "#7A1E1E",
+                          color = MAP_LAYER_STYLE$wea_color,
                           linewidth = .7, 
                           alpha = .05) {
-  ggplot2::geom_sf(data = wea, fill = color, color = color, linewidth = linewidth,
+  ggplot2::geom_sf(data = wea, fill = NA, color = color, linewidth = linewidth,
                    alpha = alpha)
 }
 
 map_layer_study_area <- function(study_area,
-                                 color = "black",
+                                 color = MAP_LAYER_STYLE$study_area_color,
                                  linewidth = 0.7,
                                  linetype = "dashed") {
   ggplot2::geom_sf(data = study_area, fill = NA, color = color,
@@ -133,7 +133,7 @@ map_layer_study_area <- function(study_area,
 
 map_layer_bathy_contours <- function(contours,
                                      levels = c(200, 500,1000, 3000),
-                                     color = "grey75",
+                                     color = MAP_LAYER_STYLE$bathy_color,
                                      linewidth = 0.45) {
   if (is.null(contours)) {
     return(ggplot2::geom_blank())
@@ -145,7 +145,7 @@ map_layer_bathy_contours <- function(contours,
 }
 
 map_layer_kde_contour <- function(contour_sf,
-                                  color = "lightblue",
+                                  color = MAP_LAYER_STYLE$kde_contour_color,
                                   linewidth = 0.3) {
   ggplot2::geom_sf(data = contour_sf, fill = NA, color = color, linewidth = linewidth)
 }
