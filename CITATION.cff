@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+message: "If you use this code or report in your work, please cite it using the metadata below."
+type: software
+title: "WEA Cetacean Baseline Report"
+abstract: >
+  R analysis pipeline and report for summarising cetacean baseline information
+  for the Wind Energy Area (WEA) study region on the Eastern Scotian Shelf.
+  Combines vessel sightings from the DFO Whale Sightings Database (WSDB),
+  DFO aerial survey records, and passive acoustic monitoring (PAM) detections
+  to produce deduplicated sightings tables, spatial coverage and effort
+  summaries, species-level sightings maps, kernel density estimate (KDE)
+  rasters and contour products, and an HTML baseline report.
+authors:
+  - family-names: Feyrer
+    given-names: Laura Joan
+    email: laura.joan@gmail.com
+    orcid: "https://orcid.org/0000-0002-9300-1947"
+version: "1.0"
+date-released: "2026-06-02"
+license: "CC-BY-4.0"
+repository-code: "https://github.com/MARTeamWhale/WEA-cetacean-baseline-report"
+keywords:
+  - cetaceans
+  - marine mammals
+  - wind energy
+  - Eastern Scotian Shelf
+  - kernel density estimation
+  - passive acoustic monitoring
+  - DFO
+  - R
