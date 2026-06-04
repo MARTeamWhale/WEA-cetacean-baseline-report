@@ -818,20 +818,56 @@ if (!is.null(df_source)) {
 }
 ```
 
-### Species Record Counts
+## Appendix C. Number of sightings records for species or groups in the study area
 
 ```{r summary-species-counts}
-# ---- Summary: records by species ----
+# ---- Appendix C: records by species with scientific names ----
 # Expected file: output/data/sightings_by_species.csv
 
+sci_lookup <- tibble::tribble(
+  ~common_name,                    ~scientific_name,
+  "Dolphin/Porpoise (NS)",         "—",
+  "Cetacean (NS)",                 "—",
+  "Fin/Sei Whale",                 "—",
+  "Long-Finned Pilot Whale",       "Globicephala melas",
+  "Northern Bottlenose Whale",     "Hyperoodon ampullatus",
+  "Humpback Whale",                "Megaptera novaeangliae",
+  "Common Dolphin",                "Delphinus delphis",
+  "Minke Whale",                   "Balaenoptera acutorostrata",
+  "Fin Whale",                     "Balaenoptera physalus",
+  "Atlantic White-Sided Dolphin",  "Lagenorhynchus acutus",
+  "Sowerby's Beaked Whale",        "Mesoplodon bidens",
+  "Sperm Whale",                   "Physeter macrocephalus",
+  "Blue Whale",                    "Balaenoptera musculus",
+  "Risso's Dolphin",               "Grampus griseus",
+  "Harbour Porpoise",              "Phocoena phocoena",
+  "Atlantic Bottlenose Dolphin",   "Tursiops truncatus",
+  "North Atlantic Right Whale",    "Eubalaena glacialis",
+  "Striped Dolphin",               "Stenella coeruleoalba",
+  "White-Beaked Dolphin",          "Lagenorhynchus albirostris",
+  "Sei Whale",                     "Balaenoptera borealis",
+  "Killer Whale",                  "Orcinus orca",
+  "Cuvier's Beaked Whale",         "Ziphius cavirostris",
+  "Beluga Whale",                  "Delphinapterus leucas",
+  "False Killer Whale",            "Pseudorca crassidens"
+)
 
 df_sp <- read_csv_safe(csv_sightings_by_species)
 if (!is.null(df_sp)) {
-  knitr::kable(df_sp,
-               caption   = "Most frequently recorded species/groups",
-               col.names = c("Common Name", "N Records")) %>%
-    kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
-                              full_width = FALSE)
+  df_sp %>%
+    dplyr::arrange(dplyr::desc(n)) %>%
+    dplyr::mutate(Rank = dplyr::row_number()) %>%
+    dplyr::left_join(sci_lookup, by = "common_name") %>%
+    dplyr::mutate(scientific_name = tidyr::replace_na(scientific_name, "—")) %>%
+    dplyr::select(Rank,
+                  `Common Name`      = common_name,
+                  `Scientific Name`  = scientific_name,
+                  `Sightings Records` = n) %>%
+    knitr::kable(align = c("r","l","l","r"),
+                 format.args = list(big.mark = ",")) %>%
+    kableExtra::kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                              full_width = FALSE) %>%
+    kableExtra::column_spec(3, italic = TRUE)
 }
 ```
 
@@ -1491,6 +1527,269 @@ if (!is.null(sightings_summary) &&
       ") within 10 km of WEA boundaries than could be identified to the species level.\n\n"
     )
   )
+}
+```
+
+## Results Section 3.3 Copy-Ready Text
+
+```{r section-3-3-seasonal, results='asis'}
+# ---- Copy-ready narrative for Word report Results section 3.3 ----
+# Reads seasonal_records_summary.csv saved by 06_summarize_wsdb_seasonality.R.
+# Numbers reflect the same dataset and filters used by that script (cell_m,
+# year >= 2010, study area extent), so they will always match the season maps.
+# Requires: output/data/seasonal_records_summary.csv
+
+seas_csv <- here("output", "data", "seasonal_records_summary.csv")
+
+if (file.exists(seas_csv)) {
+
+  seas_summary <- readr::read_csv(seas_csv, show_col_types = FALSE) %>%
+    dplyr::mutate(season = factor(season, levels = c("Spring", "Summer", "Fall", "Winter")))
+
+  # Helper: pull a single value for a given season and column
+  s <- function(season_name, col) {
+    seas_summary[[col]][seas_summary$season == season_name]
+  }
+
+  cat(
+    paste0(
+      "As noted above, sightings records were strongly summer-weighted: summer accounted for ",
+      s("Summer", "pct"), "% of all records (n = ",
+      scales::comma(s("Summer", "n_records")),
+      "), while winter represented only ",
+      s("Winter", "pct"), "% (n = ",
+      scales::comma(s("Winter", "n_records")),
+      ") (Figure 3). Spring and fall contributed ",
+      s("Spring", "pct"), "% (n = ",
+      scales::comma(s("Spring", "n_records")), ") and ",
+      s("Fall", "pct"), "% (n = ",
+      scales::comma(s("Fall", "n_records")),
+      "), respectively. ",
+      "This seasonal imbalance was reflected spatially, with summer sightings distributed broadly across the study area and winter records sparse and patchy, particularly across offshore areas (Figure 3). ",
+      "Consequently, the dataset provides stronger support for inference on occurrence during spring through fall than during winter. ",
+      "Areas with few or no winter sightings should be interpreted cautiously due to limited observation coverage."
+    )
+  )
+
+} else {
+  cat("*Seasonal summary not available -- run 06_summarize_wsdb_seasonality.R (RUN_SUMMARIZE_SEASONALITY <- TRUE) first.*")
+}
+```
+
+## Results Section 3.5 Copy-Ready Text
+
+```{r section-3-5-confidence, results='asis'}
+# ---- Copy-ready narrative for Word report Results section 3.5 ----
+# Reads overall_conf_summary.csv (from 05_summarize_wsdb_confidence.R) and
+# wea_10km_area_summary.csv (from 02_prepare_combined_sightings.R).
+# Grid cell size is read from params_effort.csv.
+# Spatial extent is expressed as % of study area (cells * cell_km2 / study_area_km2).
+# Requires: output/data/overall_conf_summary.csv
+#           output/data/wea_10km_area_summary.csv
+#           output/data/params_effort.csv
+
+conf_csv <- here("output", "data", "overall_conf_summary.csv")
+area_csv <- here("output", "data", "wea_10km_area_summary.csv")
+par_csv  <- here("output", "data", "params_effort.csv")
+
+if (file.exists(conf_csv) && file.exists(area_csv) && file.exists(par_csv)) {
+
+  conf  <- readr::read_csv(conf_csv, show_col_types = FALSE)
+  areas <- readr::read_csv(area_csv, show_col_types = FALSE)
+  pars  <- readr::read_csv(par_csv,  show_col_types = FALSE)
+
+  # Grid cell area in km²
+  grid_km      <- as.numeric(pars$Value[pars$Parameter == "grid_km"])
+  cell_area_km2 <- grid_km^2
+
+  # Study area km² (for converting cell counts to % of study area)
+  study_area_km2 <- areas$area_km2[areas$region == "Study area"]
+  wea_area_km2   <- areas$area_km2[areas$region == "WEA polygons"]
+
+  # Pull study region and WEA rows
+  sr  <- conf[conf$region == "Study Region", ]
+  wea <- conf[conf$region == "WEA", ]
+
+  # Approximate gridded area (cells × cell size; stated as approximate because
+  # 25 km grid cells slightly overhang the study area boundary)
+  sr_area_approx  <- round(sr$total_cells  * cell_area_km2 / 1000) * 1000  # round to nearest 1000
+  wea_area_approx <- round(wea$total_cells * cell_area_km2 / 100)  * 100   # round to nearest 100
+
+  cat(
+    paste0(
+      "Across the full study region, sightings were recorded in ",
+      ifelse(sr$cells_with_data == sr$total_cells,
+             "every grid cell (approximately ",
+             paste0(sr$cells_with_data, " of ", sr$total_cells, " grid cells (~")),
+      scales::comma(sr_area_approx), " km²), ",
+      "with a mean of ", sr$mean_records_per_cell,
+      " records per ", grid_km, " km cell (median ", sr$median_records_per_cell,
+      ") and mean temporal coverage of ", sr$mean_years_per_cell,
+      " years (median ", sr$median_years_per_cell, ") (Figure 5). ",
+      "High confidence was reached in ", sr$pct_high_confidence,
+      "% of cells; ", sr$pct_low_confidence, "% were classified as low confidence. ",
+
+      "Within the WEA footprint, sightings were recorded in ",
+      ifelse(wea$cells_with_data == wea$total_cells,
+             "every grid cell",
+             paste0(wea$cells_with_data, " of ", wea$total_cells, " grid cells")),
+      ", ",
+      "with a mean of ", wea$mean_records_per_cell,
+      " records per ", grid_km, " km cell (median ", wea$median_records_per_cell,
+      ") and mean temporal coverage of ", wea$mean_years_per_cell,
+      " years (median ", wea$median_years_per_cell, "). ",
+      "High confidence was reached in ", wea$pct_high_confidence,
+      "% of WEA cells, while ", wea$pct_low_confidence, "% were classified as low confidence",
+      ifelse(wea$pct_low_confidence > sr$pct_low_confidence,
+             " -- a somewhat higher proportion than the study region overall, consistent with the offshore position of WEAs relative to primary survey effort.",
+             " -- consistent with the study region overall."),
+
+      " Confidence was highest for shelf baleen whales and small odontocetes, and lowest for conservation-priority, cryptic, and deep-diving taxa, as detailed in section 3.6."
+    )
+  )
+
+} else {
+  cat("*Confidence summary not available -- run 04_summarize_wsdb_effort.R and 05_summarize_wsdb_confidence.R first.*")
+}
+```
+
+## Results Section 3.6 Copy-Ready Text — Baleen Whales
+
+```{r section-3-6-baleen, results='asis'}
+# ---- Copy-ready narrative for Word report Results section 3.6 (Baleen Whales) ----
+# Reads target_conf_summary.csv produced by 05_summarize_wsdb_confidence.R.
+# The "Shelf_baleen" target covers blue, fin, sei, humpback, minke, NARW, and
+# unidentified baleen whales. Geographic/qualitative text is fixed; numbers
+# (cells, records, mean, confidence %) are pulled from data.
+# Requires: output/data/target_conf_summary.csv
+
+tgt_csv <- here("output", "data", "target_conf_summary.csv")
+
+if (file.exists(tgt_csv)) {
+
+  tgt <- readr::read_csv(tgt_csv, show_col_types = FALSE)
+
+  # Study Region row for shelf baleen
+  b <- tgt %>%
+    dplyr::filter(target == "Shelf_baleen", region == "Study Region") %>%
+    dplyr::slice(1)
+
+  cat(
+    paste0(
+      "The baleen whale group included blue, fin, sei, humpback, minke, and North Atlantic right whales, ",
+      "as well as baleen whales that could not be identified to species. ",
+      "Effort-normalized sightings showed a higher proportional representation of baleen whales ",
+      "in the Cabot Strait near Sydney Bight and between Middle and French Banks, ",
+      "where records spanned multiple years (Figure 6). ",
+      "Low data cells appeared across the southern half of the study area, ",
+      "overlapping French, as well as Sable Banks. ",
+      "Confidence in sightings data on baleen whales was high, with records across ",
+      round(b$cells_with_target / b$total_cells * 100), "% of the study area (",
+      scales::comma(b$total_target_records), " total records, mean ",
+      b$mean_target_per_cell, " records per 25 km² cell), with ",
+      b$pct_moderate_plus, "% of cells reaching moderate or higher confidence and ",
+      round(b$pct_no_evidence), "% showing no evidence."
+    )
+  )
+
+} else {
+  cat("*Target confidence summary not available -- run 04_summarize_wsdb_effort.R and 05_summarize_wsdb_confidence.R first.*")
+}
+```
+
+## Results Section 3.6.2 Copy-Ready Text — Small Odontocetes and Dolphins
+
+```{r section-3-6-2-odontocetes, results='asis'}
+# ---- Copy-ready narrative for Word report Results section 3.6.2 ----
+# Reads target_conf_summary.csv produced by 05_summarize_wsdb_confidence.R.
+# "Small_odontocetes" target covers common dolphins, Atlantic white-sided dolphins,
+# white-beaked dolphins, harbour porpoise, pilot whales, killer whales, and
+# unidentified dolphins/small odontocetes.
+# Geographic/qualitative text is fixed; numbers are pulled from data.
+# Requires: output/data/target_conf_summary.csv
+
+if (file.exists(tgt_csv)) {
+
+  o <- tgt %>%
+    dplyr::filter(target == "Small_odontocetes", region == "Study Region") %>%
+    dplyr::slice(1)
+
+  cat(
+    paste0(
+      "The small odontocete and dolphin group included common dolphins, Atlantic white-sided dolphins, ",
+      "white-beaked dolphins, harbour porpoise, pilot whales, killer whales, and unidentified dolphins ",
+      "or small odontocetes. ",
+      "Sightings-based maps indicated a higher proportion of occurrence along coastal and Scotian slope areas, ",
+      "including higher areas of concentration north of Sydney Bight and overlapping with French and Middle Banks (Figure 8-9). ",
+      "Low data cells appeared across the study area, overlapping French, as well as Sable Banks (Figure 8). ",
+      "Because there are no corresponding PAM analyses for odontocetes in this report, we have limited ",
+      "understanding of seasonal persistence across the study area. ",
+      "Small odontocetes showed the strongest coverage overall, with records across ",
+      round(o$cells_with_target / o$total_cells * 100), "% of the study area (",
+      scales::comma(o$total_target_records), " total records, mean ",
+      o$mean_target_per_cell, " records per 25 km² cell), with ",
+      o$pct_moderate_plus, "% of study region cells at moderate or higher confidence and ",
+      round(o$pct_no_evidence), "% lacking any records."
+    )
+  )
+
+} else {
+  cat("*Target confidence summary not available -- run 04_summarize_wsdb_effort.R and 05_summarize_wsdb_confidence.R first.*")
+}
+```
+
+## Results — Rare Taxa Copy-Ready Text
+
+```{r section-rare-taxa, results='asis'}
+# ---- Copy-ready narrative for rare taxa paragraph ----
+# Reads sightings_by_species.csv (produced by 02_prepare_combined_sightings.R).
+# Species are sorted by record count descending and listed with inline n values.
+# Requires: output/data/sightings_by_species.csv
+
+sp_csv <- here("output", "data", "sightings_by_species.csv")
+
+if (file.exists(sp_csv)) {
+
+  sp <- readr::read_csv(sp_csv, show_col_types = FALSE)
+
+  # Helper: pull n for a named species (returns 0 if not found)
+  sp_n <- function(name) {
+    val <- sp$n[sp$common_name == name]
+    if (length(val) == 0) 0L else as.integer(val[1])
+  }
+
+  # Rare taxa list -- add or remove species here as needed
+  rare <- tibble::tribble(
+    ~label,                  ~key,
+    "striped dolphin",       "Striped Dolphin",
+    "white-beaked dolphin",  "White-Beaked Dolphin",
+    "sei whale",             "Sei Whale",
+    "killer whale",          "Killer Whale",
+    "beluga whale",          "Beluga Whale",
+    "false killer whale",    "False Killer Whale"
+  ) %>%
+    dplyr::mutate(n = purrr::map_int(key, sp_n)) %>%
+    dplyr::arrange(dplyr::desc(n))
+
+  # Build "Species (n = X), Species (n = X), ..., and Species (n = X)" list
+  entries <- paste0(rare$label, " (n = ", scales::comma(rare$n), ")")
+  rare_list <- if (length(entries) == 1) {
+    entries
+  } else {
+    paste0(paste(entries[-length(entries)], collapse = ", "),
+           ", and ", entries[length(entries)])
+  }
+
+  cat(
+    paste0(
+      "Records of ", rare_list,
+      " were too sparse to support standalone spatial interpretation but are noted as ",
+      "relevant evidence of occurrence and species diversity for the broader Scotian Shelf study area."
+    )
+  )
+
+} else {
+  cat("*Species summary not available -- run 02_prepare_combined_sightings.R first.*")
 }
 ```
 

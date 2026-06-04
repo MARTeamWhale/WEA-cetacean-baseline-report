@@ -49,9 +49,9 @@ RUN_COMBINE_SIGHTINGS <- F
 # Produces:  output/figs/sights/*.png
 #            output/data/params_effort.csv / params_kde.csv / etc.
 RUN_PLOT_SIGHTINGS         <- FALSE  # 03_plot_combined_sightings.R
-RUN_SUMMARIZE_EFFORT       <- FALSE  # 04_summarize_wsdb_effort.R
+RUN_SUMMARIZE_EFFORT       <- F  # 04_summarize_wsdb_effort.R
 RUN_SUMMARIZE_CONFIDENCE   <- FALSE  # 05_summarize_wsdb_confidence.R
-RUN_SUMMARIZE_SEASONALITY  <- FALSE  # 06_summarize_wsdb_seasonality.R
+RUN_SUMMARIZE_SEASONALITY  <- F  # 06_summarize_wsdb_seasonality.R
 RUN_SUMMARIZE_PAM          <- FALSE  # 07_summarize_pam_detections.R
 
 # ---- GROUP D: KDE models (SLOW -- 20+ min, skip if rasters exist) -----------
@@ -95,10 +95,10 @@ RUN_COMPARE_PAM_SIGHTINGS <- T  # 11_compare_kde_pam_vs_sightings.R  (was 10, re
 # RUN_KDE_MODELS <- TRUE
 # RUN_KDE_CONTOURS <- TRUE; RUN_COMPARE_PAM_SIGHTINGS <- TRUE
 
-# -- PRESET: Tweak map layouts only (KDEs already done) -----------------------
-RUN_PLOT_SIGHTINGS <- TRUE
-RUN_KDE_MAPS_ONLY  <- TRUE
-RUN_COMPARE_PAM_SIGHTINGS <- TRUE
+# # -- PRESET: Tweak map layouts only (KDEs already done) -----------------------
+# RUN_PLOT_SIGHTINGS <- TRUE
+# RUN_KDE_MAPS_ONLY  <- TRUE
+# RUN_COMPARE_PAM_SIGHTINGS <- TRUE
 
 # -- PRESET: New data delivery (re-run from aerial clean through KDEs) ---------
 # RUN_CLEAN_AERIAL <- TRUE; RUN_COMBINE_SIGHTINGS <- TRUE
@@ -230,6 +230,10 @@ if (RUN_SUMMARIZE_CONFIDENCE) {
 
 ## 06_summarize_wsdb_seasonality.R ----
 if (RUN_SUMMARIZE_SEASONALITY) {
+  if (!RUN_SUMMARIZE_EFFORT && !exists("cell_m")) {
+    stop("06_summarize_wsdb_seasonality.R requires objects from 04_summarize_wsdb_effort.R.\n",
+         "Either set RUN_SUMMARIZE_EFFORT <- TRUE, or run 04 first in the same R session.")
+  }
   cat(">>> Running 06_summarize_wsdb_seasonality.R ...\n")
   source(here("scripts", "06_summarize_wsdb_seasonality.R"))
   cat("    Done.\n\n")

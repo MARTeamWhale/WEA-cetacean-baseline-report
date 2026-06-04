@@ -170,7 +170,10 @@ longest_streak <- function(years_vec) {
 }
 
 # Standardised map theme
-theme_map <- function(show_axes = FALSE) {
+# legend_position: c(x, y) for inside-plot placement (default bottom-right),
+#                  or a string e.g. "right" for outside placement,
+#                  or "none" to suppress.
+theme_map <- function(show_axes = FALSE, legend_position = c(0.92, 0.05)) {
   theme_minimal(base_size = 12) +
     theme(
       panel.grid   = element_blank(),
@@ -180,7 +183,14 @@ theme_map <- function(show_axes = FALSE) {
       axis.title   = element_blank(),
       plot.title    = element_text(size = 14, face = "bold"),
       plot.subtitle = element_text(size = 10),
-      plot.caption  = element_text(size = 8, hjust = 0)
+      plot.caption  = element_text(size = 8, hjust = 0),
+      legend.position      = legend_position,
+      legend.justification = c(1, 0),
+      legend.background    = element_rect(fill = "white", color = NA),
+      legend.key.height    = unit(0.55, "cm"),
+      legend.key.width     = unit(0.25, "cm"),
+      legend.title         = element_text(size = 10),
+      legend.text          = element_text(size = 9)
     )
 }
 
@@ -527,16 +537,7 @@ p_all <- ggplot(cell_all) +
   scale_y_continuous(breaks = seq(40, 48, by = 2)) +
   coord_sf(xlim = xlims, ylim = ylims, crs = 32620, datum = sf::st_crs(4326),
            expand = FALSE, clip = "on") +
-  theme_map(show_axes = TRUE) +
-  theme(
-    legend.position = c(0.92, 0.1),
-    legend.justification = c(1, 0),
-    legend.background = element_rect(fill = "white", color = NA),
-    legend.key.height = unit(0.55, "cm"),
-    legend.key.width = unit(0.25, "cm"),
-    legend.title = element_text(size = 10),
-    legend.text = element_text(size = 9)
-  )
+  theme_map(show_axes = TRUE)
 
 p_all <- suppressMessages(add_spatial_layers(p_all, land, WEA_wind, study_area, survey_area))
 suppressMessages(ggsave(file.path(out_dir, "00_all_cetacean_records.png"),
@@ -549,11 +550,11 @@ message("  Saved: 00_all_cetacean_records.png")
 message("\n=== CREATING CONFIDENCE MAP ===")
 
 confidence_colors <- c(
-  "Low"         = "#fee5d9",
-  "Low-Medium"  = "#fdd49e",
-  "Medium"      = "#fdbb84",
-  "Medium-High" = "#a1d99b",
-  "High"        = "#31a354"
+  "Low"         = "#fdd49e",   # light yellow, hatched in legend
+  "Low-Medium"  = "#f4b942",   # mid yellow, hatched in legend
+  "Medium"      = "#f0a500",   # amber yellow
+  "Medium-High" = "#a1d99b",   # light green
+  "High"        = "#31a354"    # dark green
 )
 
 cell_all_pattern <- cell_all %>%
@@ -680,19 +681,14 @@ create_target_maps <- function(nm, target_regex, dt_input, cell_all_conf) {
       pattern_density = 0.03, pattern_spacing = 0.015,
       pattern_angle = 45, pattern_alpha = 1.0, pattern_linewidth = 0.5
     ) +
-    scale_fill_viridis_c(option = "viridis", na.value = "grey90",
+    scale_fill_viridis_c(option = "viridis", na.value = "grey70",
                          limits = c(0, 1), name = "Proportion of\nall sightings",
                          direction = 1, begin = 0.1, end = 0.95) +
     scale_pattern_manual(values = c("none" = "none", "stripe" = "stripe"), guide = "none") +
     {if (nrow(low_conf_cells) > 0)
       geom_tile(data = low_conf_cells, aes(x = xc, y = yc),
                 fill = NA, color = "white", linewidth = 0.6)} +
-    labs(title   = paste0("Effort-normalised sightings: ", target_titles[[nm]]),
-         caption = paste0(
-           "Each cell: (target sightings) / (all cetacean sightings). Controls for observer effort.\n",
-           "White hatching: unreliable proportion (poor coverage or zero target records).\n",
-           "Grey cells: total cetacean records < ", min_records_all, "."
-         )) +
+    labs(title = paste0("Effort-normalised sightings: ", target_titles[[nm]])) +
     annotate("text", x = -Inf, y = Inf,
              label = paste0(year_min, "-", year_max, " | ", grid_km, " km grid"),
              hjust = -0.1, vjust = 1.5, size = 3.5, color = "grey30") +

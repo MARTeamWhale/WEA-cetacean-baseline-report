@@ -78,6 +78,13 @@ if (use_datatable && "data.table" %in% class(seasonal_summary)) {
 message("\nPercentage by season:")
 print(seasonal_summary)
 
+# Save for Rmd section 3.3
+readr::write_csv(
+  seasonal_summary,
+  here::here("output", "data", "seasonal_records_summary.csv")
+)
+message("  Saved seasonal_records_summary.csv")
+
 # ---------------------------
 # CALCULATE SEASONAL GRID SUMMARIES
 # ---------------------------
@@ -144,15 +151,7 @@ p_seasonal <- ggplot(cell_seasonal) +
   labs(
     title = "Seasonal Distribution of All Cetacean Sightings",
     subtitle = paste0(year_min, "–", year_max, " | ", grid_km, " km grid | log scale"),
-    caption = paste0("Seasons: Spring (Mar-May), Summer (Jun-Aug), Fall (Sep-Nov), Winter (Dec-Feb)\n",
-                     "Record counts: Spring=", seasonal_summary$n_records[seasonal_summary$season=="Spring"],
-                     " (", seasonal_summary$pct[seasonal_summary$season=="Spring"], "%), ",
-                     "Summer=", seasonal_summary$n_records[seasonal_summary$season=="Summer"],
-                     " (", seasonal_summary$pct[seasonal_summary$season=="Summer"], "%), ",
-                     "Fall=", seasonal_summary$n_records[seasonal_summary$season=="Fall"],
-                     " (", seasonal_summary$pct[seasonal_summary$season=="Fall"], "%), ",
-                     "Winter=", seasonal_summary$n_records[seasonal_summary$season=="Winter"],
-                     " (", seasonal_summary$pct[seasonal_summary$season=="Winter"], "%)")
+    caption = "Seasons: Spring (Mar-May), Summer (Jun-Aug), Fall (Sep-Nov), Winter (Dec-Feb)"
   ) +
   coord_sf(xlim = xlims, ylim = ylims, crs = 32620, expand = FALSE, clip = "on") +
   theme_minimal(base_size = 11) +

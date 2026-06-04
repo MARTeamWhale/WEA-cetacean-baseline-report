@@ -58,7 +58,8 @@ if (length(old_compare_pngs) > 0) {
 }
 
 # ---- Colour palette settings ----
-QUANTILE_PALETTE <- "mako"
+QUANTILE_PALETTE  <- "mako"
+QUANTILE_HIDE     <- c("85%")   # contour levels to drop before plotting (too light to see)
 POINT_COLOR      <- "gray40"
 STATION_COLOR    <- "orange"
 OSW_COLOR        <- "red"
@@ -658,12 +659,32 @@ create_comparison_map <- function(species_key, species_info,
       cat("  WARNING: could not load KDEs for variant", i, "\n"); next
     }
     
-    # Shared colour palette sized to quantile levels
-    n_q <- max(
-      if (!is.null(sightings_kde)) length(levels(sightings_kde$Quantile)) else 0,
-      if (!is.null(pam_kde))       length(levels(pam_kde$Quantile))       else 0
+    # Build named palette from ALL levels BEFORE filtering, so colours are
+    # stable -- removing a level just drops its entry, not shifts every colour.
+    all_levels <- unique(c(
+      if (!is.null(sightings_kde)) as.character(levels(sightings_kde$Quantile)) else character(0),
+      if (!is.null(pam_kde))       as.character(levels(pam_kde$Quantile))       else character(0)
+    ))
+    pal_full <- setNames(
+      rev(get(QUANTILE_PALETTE)(length(all_levels) + 1))[seq_along(all_levels)],
+      all_levels
     )
-    pal <- rev(get(QUANTILE_PALETTE)(n_q + 1))
+
+    # Drop unwanted contour levels (e.g. outermost 85% which renders near-white)
+    if (length(QUANTILE_HIDE) > 0) {
+      if (!is.null(sightings_kde))
+        sightings_kde <- sightings_kde %>%
+          filter(!as.character(Quantile) %in% QUANTILE_HIDE) %>%
+          mutate(Quantile = droplevels(Quantile))
+      if (!is.null(pam_kde))
+        pam_kde <- pam_kde %>%
+          filter(!as.character(Quantile) %in% QUANTILE_HIDE) %>%
+          mutate(Quantile = droplevels(Quantile))
+    }
+
+    # Palette for remaining levels only -- colours unchanged from full set
+    pal <- pal_full[!names(pal_full) %in% QUANTILE_HIDE]
+    n_q <- length(pal)
     
     base_theme <- theme_bw() +
       theme(
@@ -673,9 +694,14 @@ create_comparison_map <- function(species_key, species_info,
         axis.title    = element_blank(),
         plot.title    = element_text(size = 12, face = "bold", hjust = 0.5),
         plot.subtitle = element_text(size = 10, hjust = 0.5),
-        legend.position = "right",
-        legend.title  = element_text(size = 9),
-        legend.text   = element_text(size = 8)
+        legend.position      = c(0.99, 0.02),
+        legend.justification = c(1, 0),
+        legend.background    = element_rect(fill = "white", color = NA),
+        legend.key.height    = unit(0.55, "cm"),
+        legend.key.width     = unit(0.30, "cm"),
+        legend.title         = element_text(size = 10),
+        legend.text          = element_text(size = 9),
+        legend.box           = "horizontal"
       )
     
     # ---- Sightings panel ----
@@ -690,18 +716,34 @@ create_comparison_map <- function(species_key, species_info,
       
       p_sightings <- ggplot() +
         map_layer_bathy_contours(cont) +
-        map_layer_wea(osw_wind, alpha = 0.18, linewidth = 0.8) +
         geom_sf(data = sightings_kde, aes(fill = Quantile), color = NA, alpha = 0.6) +
-        geom_sf(data = species_sightings, color = "grey40", fill = "grey40", alpha = .5,
-                size = 1, shape = 21) +
+        map_layer_wea(osw_wind, alpha = 0.18, linewidth = 0.8) +
+        geom_sf(data = species_sightings,
+                color = if (is_grouped) "grey40" else "grey20",
+                fill  = if (is_grouped) "grey40" else "grey30",
+                alpha = if (is_grouped) 0.5  else 0.7,
+                size  = if (is_grouped) 1.0  else 1.5,
+                shape = 21) +
+        geom_point(data = data.frame(x = NA_real_, y = NA_real_),
+                   aes(x = x, y = y, shape = "Sightings"), inherit.aes = FALSE,
+                   color = if (is_grouped) "grey40" else "grey20",
+                   fill  = if (is_grouped) "grey40" else "grey30",
+                   size  = if (is_grouped) 1.0  else 1.5,
+                   alpha = if (is_grouped) 0.5  else 0.7) +
+        scale_shape_manual(name = "", values = c("Sightings" = 21),
+                           guide = guide_legend(override.aes = list(
+                             size  = if (is_grouped) 1.0  else 1.5,
+                             color = if (is_grouped) "grey40" else "grey20",
+                             fill  = if (is_grouped) "grey40" else "grey30",
+                             alpha = if (is_grouped) 0.5  else 0.7))) +
         map_layer_land(land) +
         map_layer_study_area(study_area) +
-        scale_fill_manual(values = pal, name = "KDE Quantile",
+        scale_fill_manual(values = pal, name = "Relative\nOccurrence",
                           drop = FALSE, guide = "none") +
         map_coord(xlim = xlims, ylim = ylims, crs = UTM20) +
-        labs(title    = "Sightings",
-             subtitle = paste0(nrow(species_sightings), " locations | ", param_text)) +
+        labs(title = "Sightings", subtitle = paste0(scales::comma(nrow(species_sightings)), " sightings records")) +
         base_theme +
+        theme(legend.position = c(.97, 0.05)) +
         annotation_scale(location = "br", width_hint = 0.25)
       
     } else {
@@ -721,11 +763,9 @@ create_comparison_map <- function(species_key, species_info,
       bw_text  <- if (!is.na(p_params$bandwidth))
         paste0("BW: ", round(p_params$bandwidth / 1000, 2), "km") else "BW: unknown"
       sub_text <- if (is_grouped) {
-        paste0(deployments, " deployments with detections | ", bw_text,
-               " | ", p_params$method, " | Weighted by % days detected")
+        paste0(deployments, " deployments with detections")
       } else {
-        paste0(deployments, " deployments (", nrow(pam_zero), " with 0 detections) | ",
-               bw_text, " | ", p_params$method, " | Weighted by % days detected")
+        paste0(deployments, " deployments (", nrow(pam_zero), " with 0 detections)")
       }
       
       p_pam <- ggplot() +
@@ -745,28 +785,27 @@ create_comparison_map <- function(species_key, species_info,
           geom_point(data = dummy_zero, aes(x = x, y = y, shape = label),
                      color = "gray20", fill = "gray80", size = 1.5) +
           scale_shape_manual(name = "", values = 21,
-                             labels = "No Validated Detections",
-                             guide  = guide_legend(order = 3,
+                             labels = "No Validated\nDetections",
+                             guide  = guide_legend(order = 1,
                                                    override.aes = list(size = 3)))
       }
       
       p_pam <- p_pam +
         map_layer_land(land) +
         map_layer_study_area(study_area) +
-        scale_fill_manual(values = pal, name = "KDE Quantile",
-                          drop = FALSE, guide = guide_legend(order = 1)) +
+        scale_fill_manual(values = pal, name = "Relative\nOccurrence",
+                          drop = FALSE, guide = guide_legend(order = 2)) +
         scale_size_continuous(name   = "Detection\nProportion",
                               range  = c(1, 4), limits = c(0, 1),
                               breaks = c(0.2, 0.5, 0.9),
-                              guide  = guide_legend(order = 2)) +
+                              guide  = guide_legend(order = 3)) +
         scale_color_gradient(low = "orange", high = "darkorange",
                              name   = "Detection\nProportion",
                              limits = c(0, 1), breaks = c(0.2, 0.5, 0.9),
-                             guide  = guide_legend(order = 2)) +
+                             guide  = guide_legend(order = 3)) +
         map_coord(xlim = xlims, ylim = ylims, crs = UTM20) +
         labs(title = "PAM", subtitle = sub_text) +
-        base_theme +
-        annotation_scale(location = "br", width_hint = 0.25)
+        base_theme
       
     } else {
       p_pam <- NULL
@@ -785,8 +824,8 @@ create_comparison_map <- function(species_key, species_info,
                          gsub("[^A-Za-z0-9]+", "_", tolower(species_key)),
                          "__S_", s_tag, "__P_", pam_tag, ".png")
       
-      ggsave(file.path(COMPARE_OUTPUT_DIR, out_name),
-             p_combined, width = 16, height = 8, dpi = 300, bg = "white")
+      suppressWarnings(ggsave(file.path(COMPARE_OUTPUT_DIR, out_name),
+             p_combined, width = 16, height = 8, dpi = 300, bg = "white"))
       
     } else if (pam_only && !is.null(pam_kde) && deployments > 0) {
       
@@ -798,21 +837,32 @@ create_comparison_map <- function(species_key, species_info,
                          gsub("[^A-Za-z0-9]+", "_", tolower(species_key)),
                          "__P_", pam_tag, ".png")
       
-      ggsave(file.path(COMPARE_OUTPUT_DIR, out_name),
-             p_combined, width = 10, height = 8, dpi = 300, bg = "white")
+      suppressWarnings(ggsave(file.path(COMPARE_OUTPUT_DIR, out_name),
+             p_combined, width = 10, height = 8, dpi = 300, bg = "white"))
       
     } else {
-      
+
       p_combined <- p_sightings +
-        labs(title = paste0(species_info$display_name, "  (Sightings)")) +
-        theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))
+        # Re-enable fill legend (suppressed on sightings panel in paired plots)
+        guides(fill = guide_legend(title = "Relative\nOccurrence", order = 1)) +
+        # Add a sightings point entry to the legend
+        geom_point(data = data.frame(x = NA_real_, y = NA_real_),
+                   aes(x = x, y = y, shape = "Sightings"), inherit.aes = FALSE,
+                   color = "grey20", fill = "grey30", size = 1.5, alpha = 0.7) +
+        scale_shape_manual(name = "", values = c("Sightings" = 21),
+                           guide = guide_legend(order = 2,
+                                                override.aes = list(size = 1.5, color = "grey20",
+                                                                     fill = "grey30", alpha = 0.7))) +
+        labs(title = paste0(species_info$display_name, " Sightings")) +
+        theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+              legend.position = c(0.99, 0.05))
       
       out_name <- paste0("sightings_only_",
                          gsub("[^A-Za-z0-9]+", "_", tolower(species_key)),
                          "__S_", s_tag, ".png")
       
-      ggsave(file.path(COMPARE_OUTPUT_DIR, out_name),
-             p_combined, width = 10, height = 8, dpi = 300, bg = "white")
+      suppressWarnings(ggsave(file.path(COMPARE_OUTPUT_DIR, out_name),
+             p_combined, width = 10, height = 8, dpi = 300, bg = "white"))
     }
     
     cat("  Saved:", out_name, "\n\n")
