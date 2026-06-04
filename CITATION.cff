@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use this code or report in your work, please cite it using the metadata below."
-type: software
+type: website
 title: "WEA Cetacean Baseline Report"
 abstract: >
   R analysis pipeline and report for summarising cetacean baseline information
