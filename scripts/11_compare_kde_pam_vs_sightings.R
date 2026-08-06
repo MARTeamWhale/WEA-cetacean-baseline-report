@@ -2,7 +2,7 @@
 # Author: Laura Joan Feyrer
 # Date Updated: 2026-03-15
 # Script: 10_compare_kde_pam_vs_sightings.R
-# Description: Creates side-by-side PAM vs sightings KDE comparison maps for
+# Description: Creates side-by-side  SIGHTINGS vs PAM KDE comparison maps for
 #              cetacean species. Outputs PNG maps per species to
 #              output/figs/compare_sightings_pam/. Also exports key params
 #              to output/data/params_compare.csv for the project report.
@@ -10,7 +10,7 @@
 # Changes from previous version (2026-03-13):
 #   - GROUPED_BEAKED entry updated: sightings_base now points to the grouped
 #     beaked sightings KDE from v6 KDE script (sightings_beaked_grouped),
-#     and pam_only changed from TRUE to FALSE so a PAM vs sightings comparison
+#     and pam_only changed from TRUE to FALSE so a  SIGHTINGS vs PAM comparison
 #     map is produced instead of a PAM-only map.
 #   - Added BEAKED_SPECIES_SIGHTINGS vector at top of script (mirrors
 #     beaked_species_sightings in v6 KDE script) defining which common_name
@@ -34,7 +34,7 @@ suppressWarnings(source(here::here("scripts/00_load_helpers.R")))
 # CONFIGURATION ----
 # ==============================================================================
 
-CREATE_SIGHTINGS_ONLY_MAPS <- TRUE
+CREATE_SIGHTINGS_ONLY_MAPS <- F
 
 # ---- Projections ----
 UTM20 <- st_crs(32620)
@@ -275,16 +275,16 @@ cat("+ Loaded", nrow(baleen_pam_data), "baleen PAM records within",
 
 # ---- Beaked whale PAM ----
 cat("Loading beaked whale PAM data...\n")
-beaked_pam_raw <- read_csv(BEAKED_PAM_DATA, show_col_types = FALSE)
+beaked_pam_raw <- read_csv(BEAKED_PAM_DATA, show_col_types = FALSE)%>%rename("site" = "deployment")
 
 beaked_species_codes <- unique(vapply(BEAKED_SPECIES_MAPPING, `[[`, character(1), "pam_code"))
 
 beaked_station_effort <- beaked_pam_raw %>%
-  group_by(deployment, station, latitude, longitude) %>%
+  group_by(site, station, latitude, longitude) %>%
   summarise(effort_days = n_distinct(rec_date), .groups = "drop")
 
 beaked_pam_observed <- beaked_pam_raw %>%
-  group_by(deployment, station, latitude, longitude, species) %>%
+  group_by(site, station, latitude, longitude, species) %>%
   summarise(
     detection_days = sum(presence, na.rm = TRUE),
     .groups        = "drop"
@@ -296,7 +296,7 @@ beaked_pam_processed <- tidyr::crossing(
 ) %>%
   left_join(
     beaked_pam_observed,
-    by = c("deployment", "station", "latitude", "longitude", "species")
+    by = c("site", "station", "latitude", "longitude", "species")
   ) %>%
   mutate(
     detection_days = coalesce(detection_days, 0),
@@ -313,7 +313,7 @@ beaked_species_summary <- beaked_pam_data %>%
   st_drop_geometry() %>%
   group_by(species) %>%
   summarise(
-    n_deployments   = n(),
+    n_stations   = n(),
     total_det_days  = sum(detection_days),
     mean_proportion = mean(proportion_det),
     .groups = "drop"
@@ -609,16 +609,16 @@ create_comparison_map <- function(species_key, species_info,
     }
   }
   
-  # ---- Count PAM deployments ----
-  deployments <- if (nrow(species_pam) > 0 && "site" %in% names(species_pam)) {
+  # ---- Count PAM stations ----
+  stations <- if (nrow(species_pam) > 0 && "site" %in% names(species_pam)) {
     nrow(species_pam %>% group_by(site) %>% summarise(n()))
-  } else if (nrow(species_pam) > 0 && "deployment" %in% names(species_pam)) {
-    nrow(species_pam %>% group_by(deployment) %>% summarise(n()))
+  } else if (nrow(species_pam) > 0 && "station" %in% names(species_pam)) {
+    nrow(species_pam %>% group_by(station) %>% summarise(n()))
   } else { 0 }
   
-  cat("  Sightings:", nrow(species_sightings), "  PAM deployments:", deployments, "\n")
+  cat("  Sightings:", nrow(species_sightings), "  PAM Stations:", stations, "\n")
   
-  if (nrow(species_sightings) == 0 && deployments == 0) {
+  if (nrow(species_sightings) == 0 && stations == 0) {
     cat("  ERROR: no data for sightings or PAM - skipping\n\n")
     return(NULL)
   }
@@ -753,7 +753,7 @@ create_comparison_map <- function(species_key, species_info,
     }
     
     # ---- PAM panel ----
-    if (!is.null(pam_kde) && deployments > 0) {
+    if (!is.null(pam_kde) && stations > 0) {
       
       pam_zero       <- species_pam %>% filter(proportion_det == 0)
       pam_detections <- species_pam %>% filter(proportion_det  > 0)
@@ -763,9 +763,9 @@ create_comparison_map <- function(species_key, species_info,
       bw_text  <- if (!is.na(p_params$bandwidth))
         paste0("BW: ", round(p_params$bandwidth / 1000, 2), "km") else "BW: unknown"
       sub_text <- if (is_grouped) {
-        paste0(deployments, " deployments with detections")
+        paste0(stations, " stations with detections")
       } else {
-        paste0(deployments, " deployments (", nrow(pam_zero), " with 0 detections)")
+        paste0(stations, " stations (", nrow(pam_zero), " with 0 detections)")
       }
       
       p_pam <- ggplot() +
@@ -812,11 +812,11 @@ create_comparison_map <- function(species_key, species_info,
     }
     
     # ---- Combine and save ----
-    if (!is.null(pam_kde) && deployments > 0 && !pam_only) {
+    if (!is.null(pam_kde) && stations > 0 && !pam_only) {
       
       p_combined <- (p_sightings + p_pam) +
         plot_annotation(
-          title = paste0(species_info$display_name, " PAM vs Sightings"),
+          title = paste0(species_info$display_name, " Sightings vs PAM"),
           theme = theme(plot.title = element_text(hjust = 0.5))
         )
       
@@ -827,7 +827,7 @@ create_comparison_map <- function(species_key, species_info,
       suppressWarnings(ggsave(file.path(COMPARE_OUTPUT_DIR, out_name),
              p_combined, width = 16, height = 8, dpi = 300, bg = "white"))
       
-    } else if (pam_only && !is.null(pam_kde) && deployments > 0) {
+    } else if (pam_only && !is.null(pam_kde) && stations > 0) {
       
       p_combined <- p_pam +
         labs(title = paste0(species_info$display_name, "  (PAM Only)")) +
@@ -962,7 +962,7 @@ discover_sightings_only_species <- function(shapefile_dir   = SHAPEFILE_DIR,
 # RUN: BALEEN WHALES ----
 # ==============================================================================
 
-cat("=== CREATING PAM vs SIGHTINGS COMPARISON MAPS ===\n")
+cat("=== CREATING  SIGHTINGS vs PAM COMPARISON MAPS ===\n")
 cat("CREATE_SIGHTINGS_ONLY_MAPS =", CREATE_SIGHTINGS_ONLY_MAPS, "\n\n")
 
 cat("--- Processing baleen whales (with PAM data) ---\n\n")
@@ -1038,10 +1038,10 @@ for (species_key in names(GROUPED_BALEEN)) {
                         sightings_data, baleen_pam_data, is_grouped = TRUE)
 }
 
-# Updated from v1: now a PAM vs sightings comparison map.
+# Updated from v1: now a  SIGHTINGS vs PAM comparison map.
 # Sightings panel: records matching BEAKED_SPECIES_SIGHTINGS from sightings_data.
 # PAM panel: all beaked_pam_data records (already filtered to beaked species).
-cat("\n--- Processing grouped all beaked whales (PAM vs sightings) ---\n\n")
+cat("\n--- Processing grouped all beaked whales ( Sightings vs PAM) ---\n\n")
 for (species_key in names(GROUPED_BEAKED)) {
   create_comparison_map(species_key, GROUPED_BEAKED[[species_key]],
                         sightings_data, beaked_pam_data,
@@ -1065,3 +1065,4 @@ compare_params <- tibble::tribble(
 )
 readr::write_csv(compare_params, here::here("output/data/params_compare.csv"))
 cat("+ Params exported to output/data/params_compare.csv\n")
+

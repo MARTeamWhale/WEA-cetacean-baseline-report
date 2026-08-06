@@ -76,8 +76,8 @@ RUN_KDE_MAPS_ONLY <- F
 # Requires:  output/tif/*.tif  (GROUP D output)
 # Produces:  output/shapes/multi/*.shp
 #            output/figs/compare_sightings_pam/*.png
-RUN_KDE_CONTOURS          <- FALSE  # 10_create_kde_contours.R  (was 09, renumbered)
-RUN_COMPARE_PAM_SIGHTINGS <- T  # 11_compare_kde_pam_vs_sightings.R  (was 10, renumbered)
+RUN_KDE_CONTOURS          <- FALSE  # 10_create_kde_contours.R  
+RUN_COMPARE_PAM_SIGHTINGS <- T  # 11_compare_kde_pam_vs_sightings.R  
 
 
 # ==============================================================================
