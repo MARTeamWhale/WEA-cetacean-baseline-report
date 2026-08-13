@@ -280,30 +280,32 @@ beaked_pam_raw <- read_csv(BEAKED_PAM_DATA, show_col_types = FALSE)%>%rename("si
 beaked_species_codes <- unique(vapply(BEAKED_SPECIES_MAPPING, `[[`, character(1), "pam_code"))
 
 beaked_station_effort <- beaked_pam_raw %>%
-  group_by(site, station, latitude, longitude) %>%
+  group_by(station) %>%
   summarise(effort_days = n_distinct(rec_date), .groups = "drop")
 
 beaked_pam_observed <- beaked_pam_raw %>%
-  group_by(site, station, latitude, longitude, species) %>%
+  group_by(station, latitude, longitude, species) %>%
   summarise(
     detection_days = sum(presence, na.rm = TRUE),
     .groups        = "drop"
   )
 
 beaked_pam_processed <- tidyr::crossing(
-  beaked_station_effort,
-  species = beaked_species_codes
+  beaked_station_effort
 ) %>%
   left_join(
     beaked_pam_observed,
-    by = c("site", "station", "latitude", "longitude", "species")
-  ) %>%
+    by = c( "station")
+  ) %>%group_by(station, species)%>%
   mutate(
-    detection_days = coalesce(detection_days, 0),
-    proportion_det = detection_days / effort_days
-  ) %>%
+    detection_days = sum(detection_days, na.rm = TRUE)
+  ) %>% ungroup() %>% 
+  mutate(
+proportion_det = detection_days / effort_days)%>%
   st_as_sf(coords = c("longitude", "latitude"), crs = 4326) %>%
   st_transform(UTM20)
+
+tidyr::crossing(beaked_station_effort, species = beaked_species_codes)
 
 beaked_pam_data <- st_filter(beaked_pam_processed, study_area_pam_buffer)
 cat("+ Loaded", nrow(beaked_pam_data), "beaked whale PAM records within",

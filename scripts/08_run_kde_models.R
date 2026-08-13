@@ -56,14 +56,14 @@ RUN_PAM       <- TRUE
 species_list_pam <- c("Bb", "Bm", "Bp", "Mn", "Eg", "Ba")
 
 # ANALYSIS TYPE OPTIONS
-RUN_INDIVIDUAL_SPECIES          <- TRUE
-RUN_FAMILY_GROUPS               <- TRUE
-RUN_INDIVIDUAL_PAM              <- TRUE
-RUN_GROUPED_PAM                 <- TRUE
-RUN_BEAKED_PAM                  <- TRUE
+RUN_INDIVIDUAL_SPECIES          <- F
+RUN_FAMILY_GROUPS               <- F
+RUN_INDIVIDUAL_PAM              <- F
+RUN_GROUPED_PAM                 <- F
+RUN_BEAKED_PAM                  <- T
 RUN_GROUPED_BEAKED_PAM          <- TRUE
-RUN_GROUPED_BEAKED_SIGHTINGS    <- TRUE   # grouped beaked whale sightings KDE
-RUN_GROUPED_DEEP_DIVERS_SIGHTINGS <- TRUE # beaked + Physeter sperm whales sightings KDE
+RUN_GROUPED_BEAKED_SIGHTINGS    <- F   # grouped beaked whale sightings KDE
+RUN_GROUPED_DEEP_DIVERS_SIGHTINGS <- F # beaked + Physeter sperm whales sightings KDE
 RUN_ANY_BEAKED_PAM              <- RUN_BEAKED_PAM || RUN_GROUPED_BEAKED_PAM
 
 # BANDWIDTH OPTIONS
@@ -947,20 +947,28 @@ if (RUN_ANY_BEAKED_PAM) {
                       Zc="Goose_Beaked_Whale", MmMe="Trues_Gervais_Beaked_Whale")
     beaked_raw <- read_csv("input/raw_data/PAM/beaked_pam_results_2026-01-12.csv",
                            show_col_types = FALSE)
-    beaked_station_effort <- beaked_raw %>%
-      group_by(deployment, station, latitude, longitude) %>%
+    # Aggregate to STATION level: multiple deployments at the same station are
+    # repeat recording periods at ~the same geographic location and should be
+    # summed, not treated as separate spatial points in the KDE point pattern.
+    beaked_deployment_effort <- beaked_raw %>%
+      group_by(station, deployment, latitude, longitude) %>%
       summarise(effort_days = n_distinct(rec_date), .groups = "drop")
+    beaked_station_effort <- beaked_deployment_effort %>%
+      group_by(station) %>%
+      summarise(
+        latitude    = mean(latitude, na.rm = TRUE),
+        longitude   = mean(longitude, na.rm = TRUE),
+        effort_days = sum(effort_days),
+        .groups = "drop"
+      )
     beaked_observed <- beaked_raw %>%
-      group_by(deployment, station, latitude, longitude, species) %>%
+      group_by(station, species) %>%
       summarise(detection_days = sum(presence, na.rm = TRUE), .groups = "drop")
     beaked_sf <- tidyr::crossing(
-        beaked_station_effort,
-        species = names(beaked_names)
-      ) %>%
-      left_join(
-        beaked_observed,
-        by = c("deployment", "station", "latitude", "longitude", "species")
-      ) %>%
+      beaked_station_effort,
+      species = names(beaked_names)
+    ) %>%
+      left_join(beaked_observed, by = c("station", "species")) %>%
       mutate(
         detection_days = coalesce(detection_days, 0),
         proportion_det = detection_days / effort_days
@@ -1000,7 +1008,7 @@ if (RUN_ANY_BEAKED_PAM) {
   if (RUN_GROUPED_BEAKED_PAM) {
     cat("\n=== GROUPED BEAKED WHALE PAM KDE ===\n\n")
     beaked_grp <- beaked_sf %>%
-      group_by(deployment, station, geometry) %>%
+      group_by(station, geometry) %>%
       summarise(detection_days = sum(detection_days, na.rm = TRUE),
                 effort_days    = dplyr::first(effort_days), .groups = "drop") %>%
       mutate(proportion_det = detection_days / effort_days,

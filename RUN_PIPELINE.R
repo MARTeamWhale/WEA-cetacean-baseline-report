@@ -61,7 +61,7 @@ RUN_SUMMARIZE_PAM          <- FALSE  # 07_summarize_pam_detections.R
 #            input/raw_data/PAM/baleen_presence_laura_2025.csv
 # Produces:  output/tif/*.tif   (KDE rasters -- fed into GROUP E)
 #            output/figs/KDE_maps/*.png
-RUN_KDE_MODELS <- FALSE
+RUN_KDE_MODELS <- F
 
 # ---- GROUP D (fast): Re-plot KDE maps only (skips computation) --------------
 # When to re-run: After tweaking map aesthetics without
@@ -76,7 +76,7 @@ RUN_KDE_MAPS_ONLY <- F
 # Requires:  output/tif/*.tif  (GROUP D output)
 # Produces:  output/shapes/multi/*.shp
 #            output/figs/compare_sightings_pam/*.png
-RUN_KDE_CONTOURS          <- FALSE  # 10_create_kde_contours.R  
+RUN_KDE_CONTOURS          <- T  # 10_create_kde_contours.R  
 RUN_COMPARE_PAM_SIGHTINGS <- T  # 11_compare_kde_pam_vs_sightings.R  
 
 
