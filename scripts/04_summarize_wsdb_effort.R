@@ -1,6 +1,6 @@
 # ==============================================================================
 # Laura Joan Feyrer
-# Date Updated: 2026-03-12
+# Date Updated: 2026-08
 # Script: 04_summarize_wsdb_effort.R
 # Description: Generates gridded maps of cetacean sightings from wsdb and aerial
 #              survey data. Produces: (1) an all-cetacean coverage map,
@@ -12,10 +12,8 @@
 #              guilds.
 #
 # Changes from previous version:
-#     This resolves near-boundary species showing artificially
-#     low WEA record counts in downstream confidence summaries.
-#   - Added seasonal summary table (Section 15): records by season x region
-#     for target species and guilds, saved as CSV and printed to console.
+#    Added figure tweaks for poster version of coverage map
+#     Optimized the seasonal parameters with helper
 # ==============================================================================
 
 suppressWarnings(source(here::here("scripts/00_load_helpers.R")))
@@ -58,11 +56,30 @@ map_width    <- 10
 map_height   <- 8
 map_dpi      <- 300
 
-# Seasonal definitions
-spring_months <- c(3, 4, 5)    # March, April, May
-summer_months <- c(6, 7, 8)    # June, July, August
-fall_months   <- c(9, 10, 11)  # September, October, November
-winter_months <- c(12, 1, 2)   # December, January, February
+# ---------------------------
+# POSTER FIGURE SWITCH
+# ---------------------------
+# When TRUE, an additional poster-formatted version of the density map is
+# rendered (00_all_cetacean_records_poster.png): no lat/long axes, no
+# top-left date/grid/log-scale caption (too small to read on a poster), and
+# sized to sit side-by-side with the seasonal coverage poster figure from
+# 06_summarize_wsdb_seasonality.R - i.e. the same height, with width
+# auto-scaled to the map's true aspect ratio so the panel isn't stretched
+# or padded with excess whitespace. Set to FALSE to skip it; the regular
+# report figure (00_all_cetacean_records.png) is always produced either way.
+make_poster_version <- TRUE
+poster_height_cm    <- 18     # match 00_seasonal_coverage_poster.png height
+poster_dpi          <- 300
+poster_text_scale   <- 1.3    # bump title/legend text up a bit for the poster
+
+# Seasonal definitions - the single source of truth is SEASON_MONTHS in
+# scripts/helpers/helper_seasons.R (sourced above via 00_load_helpers.R),
+# shared with 06_summarize_wsdb_seasonality.R and 07_summarize_pam_detections.R.
+# These are just local aliases for readability further down this script.
+spring_months <- SEASON_MONTHS$Spring
+summer_months <- SEASON_MONTHS$Summer
+fall_months   <- SEASON_MONTHS$Fall
+winter_months <- SEASON_MONTHS$Winter
 
 # Target species groups (regex patterns)
 targets <- list(
@@ -272,18 +289,13 @@ df <- df %>%
 
 # Name blob for target regex matching
 df <- df %>%
-  mutate(
-    name_blob = paste0(scientific_name, " | ", common_name),
-    # Season assignment
-    season = case_when(
-      month %in% spring_months ~ "Spring",
-      month %in% summer_months ~ "Summer",
-      month %in% fall_months   ~ "Fall",
-      month %in% winter_months ~ "Winter",
-      TRUE ~ NA_character_
-    ),
-    is_spring = month %in% spring_months
-  )
+  mutate(name_blob = paste0(scientific_name, " | ", common_name))
+
+# Season assignment - shared definition (scripts/helpers/helper_seasons.R),
+# so every downstream script that consumes dt$season (06, and anything else
+# sourced later in this session) agrees with this one classification.
+df <- add_season(df, date_col = date_utc, season_col = "season", month_col = "month")
+df <- df %>% mutate(is_spring = month %in% spring_months)
 
 # Aggregate ambiguous species groups
 df <- df %>%
@@ -518,31 +530,84 @@ if (log_transform_all) {
   actual_values <- NULL
 }
 
-p_all <- ggplot(cell_all) +
+# Shared base layers (tile fill + colour scale) used by both the report and
+# poster versions below, so the two stay in sync automatically.
+p_all_base <- ggplot(cell_all) +
   geom_tile(aes(x = xc, y = yc, fill = n_all_display)) +
   {if (log_transform_all) {
-    scale_fill_viridis_c(option = "viridis", na.value = "grey90", name = "Count",
+    scale_fill_viridis_c(option = "viridis", na.value = "grey90", name = "Cetacean\nSightings",
                          breaks = log_breaks, labels = actual_values,
                          begin = 0.15, end = 0.95)
   } else {
-    scale_fill_viridis_c(option = "viridis", na.value = "grey90", name = "Count",
+    scale_fill_viridis_c(option = "viridis", na.value = "grey90", name = "Cetacean\nSightings",
                          begin = 0.15, end = 0.95)
   }} +
   labs(title = "Density of all cetacean sightings") +
+  coord_sf(xlim = xlims, ylim = ylims, crs = 32620, datum = sf::st_crs(4326),
+           expand = FALSE, clip = "on")
+
+p_all <- p_all_base +
   annotate("text", x = -Inf, y = Inf,
            label = paste0(year_min, "-", year_max, " | ", grid_km, " km grid",
                           if (log_transform_all) " | log scale" else ""),
            hjust = -0.1, vjust = 1.5, size = 3.5, color = "grey30") +
   scale_x_continuous(breaks = seq(-66, -56, by = 2)) +
   scale_y_continuous(breaks = seq(40, 48, by = 2)) +
-  coord_sf(xlim = xlims, ylim = ylims, crs = 32620, datum = sf::st_crs(4326),
-           expand = FALSE, clip = "on") +
   theme_map(show_axes = TRUE)
 
 p_all <- suppressMessages(add_spatial_layers(p_all, land, WEA_wind, study_area, survey_area))
 suppressMessages(ggsave(file.path(out_dir, "00_all_cetacean_records.png"),
        p_all, width = map_width, height = map_height, dpi = map_dpi))
 message("  Saved: 00_all_cetacean_records.png")
+
+# ---- 11a. Poster version of density map ------------------------------------------
+
+if (make_poster_version) {
+
+  message("\nCreating poster version of density map...")
+
+  # xlims/ylims are in the projected CRS (metres), so their ratio is the
+  # map panel's true aspect ratio - use it to pick a width that exactly
+  # matches poster_height_cm without stretching or padding the panel.
+  map_aspect_ratio <- diff(xlims) / diff(ylims)
+  poster_width_cm  <- poster_height_cm * map_aspect_ratio
+
+  # Source Sans Pro for poster figures only (see helper_poster_fonts.R);
+  # report figures keep the default ggplot2 font.
+  use_poster_font(dpi = poster_dpi)
+
+  p_all_poster <- p_all_base +
+    theme_map(show_axes = FALSE) +
+    theme(
+      text                  = element_text(family = POSTER_FONT_FAMILY),
+      plot.title            = element_blank(),
+      # hjust centers the title over the colorbar - legend.justification only
+      # anchors the legend *box* to legend.position, it doesn't align text
+      # within the box (legend.title defaults to hjust = 0, i.e. left-aligned).
+      legend.title          = element_text(size = 10 * poster_text_scale, hjust = 1),
+      legend.text           = element_text(size = 9 * poster_text_scale),
+      # Move off the default bottom-right spot so the legend doesn't crowd
+      # the scale bar (also bottom-right, via add_spatial_layers()).
+      legend.position       = c(.98, .99),
+      legend.justification  = c(1, 1)
+    )
+
+  p_all_poster <- suppressMessages(add_spatial_layers(p_all_poster, land, WEA_wind, study_area, survey_area))
+
+  suppressMessages(ggsave(
+    file.path(out_dir, "00_all_cetacean_records_poster.png"),
+    p_all_poster,
+    width  = poster_width_cm,
+    height = poster_height_cm,
+    units  = "cm",
+    dpi    = poster_dpi
+  ))
+
+  message(sprintf(
+    "  Saved: 00_all_cetacean_records_poster.png (%.1f x %.1f cm)",
+    poster_width_cm, poster_height_cm
+  ))
+}
 
 
 # ---- 12. Confidence map ---------------------------------------------------------
@@ -777,7 +842,10 @@ seasonal_summary <- df_tagged %>%
     n_years    = n_distinct(year, na.rm = TRUE),
     .groups    = "drop"
   ) %>%
-  # Add both regions for all combinations (fill 0 for missing)
+  # Add both regions for all combinations (fill 0 for missing). `season` is
+  # already a factor leveled per SEASON_LEVELS (from add_season() in 04
+  # above), so complete() fills every season - including any with zero
+  # records - rather than only the values that happen to appear in the data.
   tidyr::complete(target_group, region, season,
                   fill = list(n_records = 0, n_years = 0)) %>%
   mutate(
@@ -786,8 +854,7 @@ seasonal_summary <- df_tagged %>%
                                  Blue_whale        = "Blue Whale",
                                  Shelf_baleen      = "Baleen Whales (guild)",
                                  Harbour_porpoise  = "Harbour Porpoise",
-                                 Small_odontocetes = "Small Odontocetes (guild)"),
-    season = factor(season, levels = c("Spring", "Summer", "Fall", "Winter"))
+                                 Small_odontocetes = "Small Odontocetes (guild)")
   ) %>%
   arrange(target_label, region, season) %>%
   select(target_label, region, season, n_records, n_years)

@@ -52,16 +52,12 @@ baleen_DOY %>% group_by(species) %>% summarise(count = n())
 whale_data <- baleen_DOY %>%
   mutate(UTC = as.POSIXct(rec_date, format = "%Y-%m-%d")) %>%
   mutate(Date = format(as_date(rec_date), "%Y-%m-%d")) %>%
-  mutate(
-    month = lubridate::month(UTC),
-    Season = case_when(
-      month %in% c(12, 1, 2) ~ "Winter",
-      month %in% c(3, 4, 5) ~ "Spring",
-      month %in% c(6, 7, 8) ~ "Summer",
-      month %in% c(9, 10, 11) ~ "Fall",
-      TRUE ~ NA_character_
-    )
-  ) %>%
+  mutate(month = lubridate::month(UTC))
+
+# Season assignment - shared definition (scripts/helpers/helper_seasons.R),
+# also used by 04_summarize_wsdb_effort.R / 06_summarize_wsdb_seasonality.R,
+# so PAM and WSDB figures agree on where the season boundaries fall.
+whale_data <- add_season(whale_data, season_col = "Season", month_col = "month") %>%
   group_by(site, Season) %>%
   mutate(
     season_days = n_distinct(Date)

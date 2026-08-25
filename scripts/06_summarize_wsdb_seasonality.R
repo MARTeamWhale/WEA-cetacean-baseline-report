@@ -21,32 +21,29 @@ required_pkgs <- c("dplyr", "ggplot2", "sf", "lubridate")
 invisible(lapply(required_pkgs, library, character.only = TRUE))
 
 # ---------------------------
-# HELPERS
+# POSTER FIGURE SWITCH
 # ---------------------------
-# Define seasons (Northern Hemisphere)
-# Winter: Dec, Jan, Feb
-# Spring: Mar, Apr, May
-# Summer: Jun, Jul, Aug
-# Fall: Sep, Oct, Nov
+# When TRUE, an additional poster-formatted version of the seasonal
+# coverage facet map is rendered (00_seasonal_coverage_poster.png), sized
+# to poster_height_cm tall with 30 pt facet (strip) text. The regular
+# report figure (00_seasonal_coverage.png) is always produced either way -
+# set this to FALSE to skip the poster version entirely.
+make_poster_version <- TRUE
 
-add_season <- function(data, date_col = date_utc) {
-  data %>%
-    dplyr::mutate(
-      month = lubridate::month({{ date_col }}),
-      season = dplyr::case_when(
-        month %in% c(12, 1, 2) ~ "Winter",
-        month %in% c(3, 4, 5) ~ "Spring",
-        month %in% c(6, 7, 8) ~ "Summer",
-        month %in% c(9, 10, 11) ~ "Fall",
-        TRUE ~ NA_character_
-      ),
-      season = factor(season, levels = SEASON_LEVELS)
-    )
-}
+# Poster output height (cm) and target facet-label ("in each square") text
+# size (pt). Width is NOT fixed here - it's derived below from the map's
+# true aspect ratio (like 04_summarize_wsdb_effort.R's density-map poster),
+# so the 2x2 facet grid isn't padded with dead horizontal whitespace.
+poster_height_cm  <- 18
+poster_strip_size <- 30
+poster_dpi        <- 300
 
 # ---------------------------
 # ADD SEASONAL CLASSIFICATION
 # ---------------------------
+# Season boundaries (Northern Hemisphere) are defined once, in
+# scripts/helpers/helper_seasons.R (SEASON_MONTHS / add_season()), and
+# shared with 04_summarize_wsdb_effort.R and 07_summarize_pam_detections.R.
 
 message("Classifying records by season...")
 
@@ -54,7 +51,17 @@ if (use_datatable && "data.table" %in% class(dt)) {
   dt <- as_tibble(dt)
 }
 
-dt <- add_season(dt, date_utc)
+# dt normally already carries a `season` column computed by
+# 04_summarize_wsdb_effort.R using the shared add_season(). Only recompute
+# here as a fallback (e.g. if this script is sourced on its own against a
+# dt that hasn't been through 04 yet), so the two stages can never disagree
+# on where the season boundaries fall.
+if (!"season" %in% names(dt) || all(is.na(dt$season))) {
+  message("  'season' column not found on dt - computing with shared add_season()")
+  dt <- add_season(dt, date_col = date_utc, season_col = "season")
+} else {
+  dt$season <- factor(dt$season, levels = SEASON_LEVELS)
+}
 
 seasonal_summary <- dt %>%
   dplyr::group_by(season) %>%
@@ -197,6 +204,57 @@ ggsave(
 )
 
 message("  ✓ Saved seasonal coverage map")
+
+# ---------------------------
+# CREATE POSTER VERSION OF SEASONAL FACETED MAP
+# ---------------------------
+if (make_poster_version) {
+
+  message("\nCreating poster version of seasonal coverage map...")
+
+  # facet_wrap(~season, ncol = 2) lays the 4 seasons out as a 2x2 grid, and
+  # coord_sf enforces each panel's true aspect ratio (xlims/ylims are in the
+  # projected CRS, from 04_summarize_wsdb_effort.R). Since both the grid's
+  # width and height scale by the same factor (2 panels each way), the
+  # whole facet grid's natural aspect ratio is ~the same as one map panel's
+  # - use it to pick a width that matches poster_height_cm without padding
+  # the image with dead horizontal whitespace (same approach as the density
+  # map poster in 04).
+  map_aspect_ratio <- diff(xlims) / diff(ylims)
+  poster_width_cm  <- poster_height_cm * map_aspect_ratio
+
+  # Source Sans Pro for poster figures only (see helper_poster_fonts.R);
+  # report figures keep the default ggplot2 font.
+  use_poster_font(dpi = poster_dpi)
+
+  # No title/subtitle/caption/legend on the poster - they eat too much space
+  # next to the enlarged facet text, and the poster has its own surrounding
+  # labels. Only the facet (season) labels carry text, at poster_strip_size,
+  # not bold so it doesn't read heavier than the surrounding poster text.
+  p_seasonal_poster <- p_seasonal +
+    theme(
+      text          = element_text(family = POSTER_FONT_FAMILY),
+      plot.title    = element_blank(),
+      plot.subtitle = element_blank(),
+      plot.caption  = element_blank(),
+      legend.position = "none",
+      strip.text    = element_text(size = poster_strip_size, face = "plain")
+    )
+
+  ggsave(
+    file.path(out_dir, "00_seasonal_coverage_poster.png"),
+    p_seasonal_poster,
+    width  = poster_width_cm,
+    height = poster_height_cm,
+    units  = "cm",
+    dpi    = poster_dpi
+  )
+
+  message(sprintf(
+    "  ✓ Saved poster seasonal coverage map (%g x %g cm, %g pt facet text)",
+    poster_width_cm, poster_height_cm, poster_strip_size
+  ))
+}
 
 # ---------------------------
 # CALCULATE SEASONAL STATISTICS FOR OSW AREAS
@@ -463,6 +521,9 @@ message(sprintf("  - Sampling ratio (max/min): %.1fx more records in peak season
 
 message("\nFiles created:")
 message("  - 00_seasonal_coverage.png (faceted map)")
+if (make_poster_version) {
+  message("  - 00_seasonal_coverage_poster.png (faceted map, poster format)")
+}
 message("  - 00_seasonal_comparison.png (bar chart)")
 if (!is.null(WEA_wind)) {
   message("  - osw_seasonal_summary.csv")
